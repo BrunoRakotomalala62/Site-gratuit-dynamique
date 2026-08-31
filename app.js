@@ -307,6 +307,7 @@ function renderMessage(m) {
   const time = m.time ? new Date(m.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
   if (m.model) meta.appendChild(el("span", "m-model", m.model));
   if (time) meta.appendChild(el("span", "m-time", time));
+  if (m.completed) meta.appendChild(el("span", "m-note", "✂️ réponse complétée"));
   bubble.appendChild(meta);
 
   msg.appendChild(bubble);
@@ -449,6 +450,41 @@ function touchConversation(id) {
   saveHistory();
 }
 
+/* ---------- Réponses coupées par le backend gratuit ----------
+   Le service gratuit (aichatting.net) plafonne les réponses longues
+   (~4 600 caractères, vérifié). On détecte la coupure et on enchaîne
+   automatiquement des demandes « continue » pour compléter la réponse. */
+function isTruncated(text) {
+  const t = (text || "").trim();
+  if (t.length < 3000) return false;           // sous la limite : complète
+  const last = t[t.length - 1];
+  if (".?!…»\"'".includes(last)) return false;  // fin de phrase normale
+  const fences = (t.match(/```/g) || []).length;
+  if (fences % 2 === 1) return true;            // bloc de code non fermé
+  return true;                                  // fin brutale (lettre, virgule, tiret…)
+}
+
+function buildContinuePrompt(partial) {
+  const tail = partial.slice(-1800);
+  return "Continue directement ce texte sans rien répéter, commence exactement là où il s'arrête, garde le même style et la même langue :\n\n" + tail + "\n\nSuite :";
+}
+
+async function completeTruncatedReply(replyText) {
+  let text = replyText || "";
+  let completed = false;
+  let guard = 0;
+  while (isTruncated(text) && guard < 3) {
+    guard++;
+    const cont = await callApi(buildContinuePrompt(text), []);
+    if (!cont.success || !cont.reply || !cont.reply.trim()) break;
+    const next = text + "\n" + cont.reply.trim();
+    if (next.length <= text.length + 150) break; // suite quasi vide → stop
+    text = next;
+    completed = true;
+  }
+  return { text, completed };
+}
+
 /* ---------- Envoi de message ---------- */
 async function sendMessage(text, attachments) {
   const input = $("#input");
@@ -512,12 +548,15 @@ async function sendMessage(text, attachments) {
     typing.remove();
 
     if (data.success) {
+      // compléter automatiquement si le backend a coupé la réponse
+      const { text: fullText, completed } = await completeTruncatedReply(data.reply);
       const reply = {
         role: "assistant",
-        text: data.reply || "(réponse vide)",
+        text: fullText || "(réponse vide)",
         images: data.images || undefined,
         model: data.model || currentModel(),
         time: Date.now(),
+        completed,
       };
       conv.messages.push(reply);
       chatArea.appendChild(renderMessage(reply));
