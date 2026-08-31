@@ -434,6 +434,7 @@ body {
 .msg.user .msg-meta { justify-content: flex-end; }
 .msg-meta .m-model { font-family: var(--font-mono); padding: 1px 7px; border-radius: 99px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); }
 .msg-meta .m-note { padding: 1px 8px; border-radius: 99px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.3); color: #fde047; font-weight: 600; }
+.msg-meta .m-vision { padding: 1px 8px; border-radius: 99px; background: rgba(139, 92, 246, 0.14); border: 1px solid rgba(139, 92, 246, 0.35); color: #c4b5fd; font-weight: 600; }
 
 /* Images dans la réponse */
 .msg-images { display: grid; gap: 8px; margin-top: 10px; }

@@ -308,6 +308,7 @@ function renderMessage(m) {
   if (m.model) meta.appendChild(el("span", "m-model", m.model));
   if (time) meta.appendChild(el("span", "m-time", time));
   if (m.completed) meta.appendChild(el("span", "m-note", "✂️ réponse complétée"));
+  if (m.images && m.images.length) meta.appendChild(el("span", "m-vision", "🖼️ vision"));
   bubble.appendChild(meta);
 
   msg.appendChild(bubble);
@@ -572,7 +573,7 @@ async function sendMessage(text, attachments) {
     role: "user",
     text: text.trim(),
     images: toSend.map((a) => a.value),
-    model: currentModel(),
+    model: toSend.length ? DEFAULT_MODEL : currentModel(), // la vision force gpt-5.6-luna
     time: Date.now(),
   };
   conv.messages.push(userMsg);
@@ -658,7 +659,11 @@ async function sendMessage(text, attachments) {
 async function callApi(text, attachments, modelOverride) {
   const params = new URLSearchParams();
   if (text.trim()) params.set("prompt", text.trim().slice(0, 4000));
-  params.set("model", modelOverride || currentModel());
+  // Vision (image jointe) : on force TOUJOURS le modèle gpt-5.6-luna,
+  // le seul modèle vision fiable du backend (les autres hallucinent).
+  const hasImages = (attachments || []).length > 0;
+  const model = hasImages ? DEFAULT_MODEL : (modelOverride || currentModel());
+  params.set("model", model);
   params.set("uid", store.uid);
   params.set("lang", LANG);
 
