@@ -27,9 +27,11 @@ sur Vercel, branché sur l'API gratuite
 - 📎 **Pièces jointes** : jusqu'à **4 images** par message — le bouton
   trombone est un `<label>` natif (le navigateur ouvre directement le
   sélecteur de fichiers, zéro JS : fiable sur tous les navigateurs, Safari/iOS
-  inclus), formats HEIC/HEIF acceptés, compression automatique ≤ 512 px.
+  inclus), formats HEIC/HEIF acceptés, compression automatique ≤ 1024 px,
+  qualité 0.8 max (vision nette).
   Un bouton lien 🔗 dédié ajoute une image **par URL** (barre inline).
-  Envoi via le paramètre `image=` répété (route vision de l'API).
+  Envoi en **POST JSON** (tableau `images`) — repli GET automatique si l'API
+  n'est pas encore à jour.
 - 🖼️ **Réponses multi-images** : l'API renvoie un tableau `images[]` — toutes
   les images sont affichées en grille cliquable (lightbox).
 - 📜 **Menu hamburger** (en haut à gauche) : bouton **Nouvelle conversation** +
@@ -53,22 +55,26 @@ npx vercel --prod
 ## 🔌 API utilisée
 
 ```
-GET https://chat-free-gpt.vercel.app/api/chat?prompt=bonjour&model=gpt-5.6-luna&uid=123&lang=fr
+GET  https://chat-free-gpt.vercel.app/api/chat?prompt=bonjour&model=gpt-5.6-luna&uid=123&lang=fr
+POST https://chat-free-gpt.vercel.app/api/chat   (JSON { prompt, model, images })
 ```
 
 | Paramètre | Description |
 |---|---|
-| `prompt` | Texte à envoyer (obligatoire, sauf si `image`) |
+| `prompt` | Texte à envoyer (obligatoire, sauf si image) |
 | `model` | Modèle (défaut : `gpt-5.6-luna`) |
-| `image` | URL ou data-URI d'une image (vision) — répéter, max 4 |
+| `image` / `images` | Image(s) (vision) — GET : `image=` répété ; POST : tableau `images`, max 4 |
 | `uid` | Identifiant client (renvoyé tel quel) |
 | `lang` | Langue du backend (défaut : `fr`) |
 
 Réponse : `{ success, reply, model, uid, images?, conversationId, source }`.
 
-> ⚠️ **Vision** : les images locales sont compressées côté client (≤ 512 px,
-> JPEG) pour rester sous les limites d'URL du GET — comportement testé avec
-> 1 et 2 images (data-URI et URL).
+> ⚠️ **Vision (v4)** : les images locales sont envoyées en **POST JSON** — plus de
+> limite de longueur d'URL (Vercel renvoyait HTTP 414 avec les data-URI en GET).
+> La compression est donc bien moins agressive : **≤ 1024 px, qualité 0.8 max**
+> (le backend redimensionne lui-même) → la vision est nettement plus précise.
+> En cas d'API pas encore à jour (404/405), le site retombe automatiquement sur
+> le GET avec re-compression au budget URL.
 
 ## 📁 Structure
 

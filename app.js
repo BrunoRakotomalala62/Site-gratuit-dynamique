@@ -571,9 +571,10 @@ async function sendMessage(text, attachments) {
   if (store.sending) return;
   if (!text.trim() && (!attachments || !attachments.length)) return;
 
-  // Re-compression si besoin (limite d'URL de l'API : ~32 Ko)
+  // Compression au budget POST (qualité haute : ≤ 1024 px, q 0.8).
+  // Le repli GET (ancienne API) re-compressera au budget URL si besoin.
   const toSend = attachments.map((a) => ({ ...a }));
-  await fitAttachmentsToBudget(toSend);
+  await fitAttachmentsToBudget(toSend, BODY_BUDGET, BODY_COMBOS, PER_IMAGE_BODY);
 
   // conversation courante
   let conv = getConversation(store.activeId);
@@ -677,30 +678,23 @@ async function sendMessage(text, attachments) {
 }
 
 async function callApi(text, attachments, modelOverride) {
-  const params = new URLSearchParams();
-  if (text.trim()) params.set("prompt", text.trim().slice(0, 4000));
+  const hasImages = (attachments || []).length > 0;
   // Vision (image jointe) : 2 modèles uniquement (gpt-5.6-luna ou claude sonnet 4),
   // quel que soit le modèle texte sélectionné (les autres hallucinent en vision).
-  const hasImages = (attachments || []).length > 0;
   const model = hasImages ? visionModel() : (modelOverride || currentModel());
-  params.set("model", model);
-  params.set("uid", store.uid);
-  params.set("lang", LANG);
-
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST);
-  imgs.forEach((a) => params.append("image", a.value));
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90000);
+  const fetchOpts = {
+    signal: controller.signal,
+    headers: { Accept: "application/json" },
+  };
 
-  try {
-    const res = await fetch(`${API_URL}?${params.toString()}`, {
-      signal: controller.signal,
-      headers: { Accept: "application/json" },
-    });
+  // Analyse une réponse de l'API (JSON attendu) → objet {success, reply, …}.
+  const handle = async (res) => {
     let data = null;
     try { data = await res.json(); } catch (e) { /* corps non JSON */ }
-
     if (!data || typeof data !== "object") {
       throw new Error(`Réponse invalide (HTTP ${res.status})`);
     }
@@ -714,6 +708,56 @@ async function callApi(text, attachments, modelOverride) {
       return { success: false, error: data.error || `Erreur HTTP ${res.status}`, model: data.model };
     }
     return data;
+  };
+
+  try {
+    if (hasImages) {
+      // --- Vision : POST JSON (v4) — aucune limite de longueur d'URL, image nette ---
+      let res = null;
+      try {
+        res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            prompt: text.trim().slice(0, 4000),
+            model,
+            uid: store.uid,
+            lang: LANG,
+            images: imgs.map((a) => a.value),
+          }),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if (err.name === "AbortError") {
+          throw new Error("Délai d'attente dépassé (90 s). L'API est peut-être surchargée.");
+        }
+        res = null; // panne réseau : on tente le repli GET
+      }
+      // 404/405 = API pas encore à jour : repli GET (recompression au budget URL)
+      if (res && res.status !== 404 && res.status !== 405) {
+        return await handle(res);
+      }
+      const forGet = imgs.map((a) => ({ ...a }));
+      await fitAttachmentsToBudget(
+        forGet, URL_BUDGET, URL_COMBOS,
+        Math.floor((URL_BUDGET * 0.95) / Math.max(1, forGet.length))
+      );
+      const params = new URLSearchParams();
+      params.set("prompt", text.trim().slice(0, 4000));
+      params.set("model", model);
+      params.set("uid", store.uid);
+      params.set("lang", LANG);
+      forGet.forEach((a) => params.append("image", a.value));
+      return await handle(await fetch(`${API_URL}?${params.toString()}`, fetchOpts));
+    }
+
+    // --- Texte seul : GET (rapide, sans corps) ---
+    const params = new URLSearchParams();
+    params.set("prompt", text.trim().slice(0, 4000));
+    params.set("model", model);
+    params.set("uid", store.uid);
+    params.set("lang", LANG);
+    return await handle(await fetch(`${API_URL}?${params.toString()}`, fetchOpts));
   } catch (err) {
     if (err.name === "AbortError") {
       throw new Error("Délai d'attente dépassé (90 s). L'API est peut-être surchargée.");
@@ -724,10 +768,19 @@ async function callApi(text, attachments, modelOverride) {
   }
 }
 
-/* ---------- Pièces jointes ---------- */
-const URL_BUDGET = 24000;      // chars de base64 (toutes images) → URL encodée < ~26 Ko, loin des 414
-const COMBOS = [
+/* ---------- Pièces jointes ----------
+   Depuis la v4, les images sont envoyées en POST JSON (aucune limite de
+   longueur d'URL) : on peut donc monter la qualité — ≤ 1024 px, qualité 0.8
+   (le backend aichatting redimensionne lui-même). Le repli GET (ancienne
+   API) re-compresse au budget URL (24 Ko, sous la limite 414 de Vercel). */
+const URL_BUDGET = 24000;       // repli GET : chars de base64 (toutes images)
+const BODY_BUDGET = 1100000;    // POST : budget total (chars base64) — large
+const PER_IMAGE_BODY = 350000;  // POST : budget par image (≈ 260 Ko binaire)
+const URL_COMBOS = [
   [512, 0.62], [448, 0.55], [384, 0.5], [320, 0.48], [256, 0.45], [192, 0.4],
+];
+const BODY_COMBOS = [
+  [1024, 0.8], [896, 0.75], [768, 0.7], [640, 0.65], [512, 0.6], [384, 0.5],
 ];
 
 function loadImageFromDataUrl(dataUrl) {
@@ -774,33 +827,36 @@ async function compressImageFile(file) {
   }
 
   // 3) sinon compression JPEG (HEIC inclus, car le navigateur sait le décoder)
+  //    v4 : ≤ 1024 px / qualité 0.8 max — le POST accepte des images bien
+  //    plus nettes qu'avant (la vision du modèle en profite).
   let best = null;
-  for (const [dim, q] of COMBOS) {
+  for (const [dim, q] of BODY_COMBOS) {
     const next = toJpegDataUrl(img, dim, q);
     best = next;
-    if (next.length <= 20000) break;
+    if (next.length <= PER_IMAGE_BODY) break;
   }
   return { name: file.name, value: best };
 }
 
-// Re-compresse les images jointes pour tenir dans la limite d'URL de l'API (~32 Ko).
-// Qualité maximale si peu d'images, réduite progressivement si beaucoup.
-async function fitAttachmentsToBudget(attachments, budget = URL_BUDGET) {
+// Re-compresse les images jointes pour tenir dans le budget demandé.
+// POST : budget large (qualité conservée) — repli GET : budget URL serré.
+async function fitAttachmentsToBudget(attachments, budget = BODY_BUDGET, combos = BODY_COMBOS, perTarget = PER_IMAGE_BODY) {
   const dataItems = attachments.filter((a) => a.value.startsWith("data:"));
   if (!dataItems.length) return;
   const total = dataItems.reduce((s, a) => s + a.value.length, 0);
   if (total <= budget) return;
 
-  const per = Math.floor((budget * 0.95) / dataItems.length);
+  const per = Math.min(perTarget, Math.floor((budget * 0.95) / dataItems.length));
   let adjusted = 0;
   for (const item of dataItems) {
     if (item.value.length <= per) continue;
     try {
       const img = await loadImageFromDataUrl(item.value);
-      for (const [dim, q] of COMBOS) {
+      const lastDim = combos[combos.length - 1][0];
+      for (const [dim, q] of combos) {
         const next = toJpegDataUrl(img, dim, q);
         if (next.length <= per) { item.value = next; adjusted++; break; }
-        if (dim === COMBOS[COMBOS.length - 1][0]) { item.value = next; adjusted++; }
+        if (dim === lastDim) { item.value = next; adjusted++; }
       }
     } catch (e) { /* image illisible : la laisser telle quelle */ }
   }
