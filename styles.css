@@ -718,9 +718,11 @@ body {
    Responsive
    ============================================================ */
 @media (max-width: 760px) {
-  .app { padding-left: 16px; padding-right: 12px; padding-top: 74px; }
+  /* La réponse part de juste sous le hamburger et remplit l'écran */
+  .app { padding-left: 8px; padding-right: 8px; padding-top: 64px; gap: 10px; }
   .brand-chip-sub { display: none; }
-  .msg { max-width: 96%; }
+  .msg { max-width: 100%; }
+  .msg.assistant .msg-bubble { flex: 1; }
   .msg-bubble { font-size: 14.2px; }
   .model-select { max-width: 100%; font-size: 11.5px; }
   .model-row { width: 100%; justify-content: center; }
@@ -731,6 +733,6 @@ body {
 }
 
 @media (max-width: 440px) {
-  .model-select { max-width: 108px; }
-  .msg { max-width: 98%; }
+  .model-select { max-width: 100%; }
+  .chat-area { gap: 14px; }
 }
