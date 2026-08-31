@@ -653,6 +653,8 @@ body {
   font-family: var(--font-body);
 }
 .model-select.pro-selected { border-color: rgba(251, 113, 133, 0.5); color: #fda4af; }
+.model-select-vision { border-color: rgba(139, 92, 246, 0.45); background: rgba(139, 92, 246, 0.08); color: #e9d5ff; }
+.model-select-vision:hover { background: rgba(139, 92, 246, 0.16); }
 
 /* Bouton envoyer */
 .send-btn {

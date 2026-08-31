@@ -117,6 +117,18 @@
         <select id="modelSelect" class="model-select" aria-label="Choisir le modèle"></select>
       </div>
     </div>
+
+    <!-- Sélecteur de modèle VISION : apparaît quand une image est jointe (2 modèles uniquement) -->
+    <div id="visionRow" class="model-row glass" hidden>
+      <span class="model-row-label">🖼️ Vision :</span>
+      <div class="model-select-wrap">
+        <svg class="model-select-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        <select id="visionSelect" class="model-select model-select-vision" aria-label="Modèle pour la vision (images)">
+          <option value="gpt-5.6-luna" selected>gpt-5.6-luna</option>
+          <option value="claude-sonnet-4-20250514">claude sonnet 4</option>
+        </select>
+      </div>
+    </div>
     <div class="composer-hint">Lumina peut faire des erreurs — vérifiez les informations importantes.</div>
   </footer>
 </main>

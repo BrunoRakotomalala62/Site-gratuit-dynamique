@@ -366,6 +366,25 @@ function currentModel() {
   return $("#modelSelect").value || DEFAULT_MODEL;
 }
 
+/* Modèle de VISION : 2 choix uniquement (gpt-5.6-luna par défaut, claude sonnet 4) */
+const LS_VISION_MODEL = "lumina.chat.visionmodel";
+function visionModel() {
+  const sel = $("#visionSelect");
+  const v = sel ? sel.value : null;
+  return v || DEFAULT_MODEL;
+}
+function saveVisionModel() {
+  try { localStorage.setItem(LS_VISION_MODEL, $("#visionSelect").value); } catch (e) { /* noop */ }
+}
+function loadVisionModel() {
+  try {
+    const v = localStorage.getItem(LS_VISION_MODEL);
+    if (v && document.querySelector(`#visionSelect option[value="${CSS.escape(v)}"]`)) {
+      $("#visionSelect").value = v;
+    }
+  } catch (e) { /* noop */ }
+}
+
 function updateModelPill() {
   const m = currentModel();
   const isPro = PRO_MODELS.has(m);
@@ -472,16 +491,16 @@ function buildContinuePrompt(partial) {
   return "Continue directement ce texte sans rien répéter, commence exactement là où il s'arrête, garde le même style et la même langue :\n\n" + tail + "\n\nSuite :";
 }
 
-async function completeTruncatedReply(replyText) {
+async function completeTruncatedReply(replyText, modelForContinuation) {
   let text = replyText || "";
   let completed = false;
   let guard = 0;
   while (isTruncated(text) && guard < 5) {     // jusqu'à 5 enchaînements
     guard++;
-    let cont = await callApi(buildContinuePrompt(text), []);
+    let cont = await callApi(buildContinuePrompt(text), [], modelForContinuation);
     if (!cont.success) {
       // échec (ex. modèle PRO) : on retente avec le modèle gratuit par défaut
-      cont = await callApi(buildContinuePrompt(text), [], DEFAULT_MODEL);
+      cont = await callApi(buildContinuePrompt(text), [], modelForContinuation || DEFAULT_MODEL);
     }
     if (!cont.success || !cont.reply || !cont.reply.trim()) break;
     const addition = cont.reply.trim();
@@ -573,7 +592,7 @@ async function sendMessage(text, attachments) {
     role: "user",
     text: text.trim(),
     images: toSend.map((a) => a.value),
-    model: toSend.length ? DEFAULT_MODEL : currentModel(), // la vision force gpt-5.6-luna
+    model: toSend.length ? visionModel() : currentModel(), // la vision n'utilise que les 2 modèles dédiés
     time: Date.now(),
   };
   conv.messages.push(userMsg);
@@ -610,7 +629,8 @@ async function sendMessage(text, attachments) {
       if (!finalData) { /* erreur déjà affichée */ }
       else {
         // compléter automatiquement si le backend a coupé la réponse
-        const { text: fullText, completed } = await completeTruncatedReply(finalData.reply);
+        // (même modèle que la réponse, y compris pour la vision)
+        const { text: fullText, completed } = await completeTruncatedReply(finalData.reply, finalData.model);
         const reply = {
           role: "assistant",
           text: fullText || "(réponse vide)",
@@ -659,10 +679,10 @@ async function sendMessage(text, attachments) {
 async function callApi(text, attachments, modelOverride) {
   const params = new URLSearchParams();
   if (text.trim()) params.set("prompt", text.trim().slice(0, 4000));
-  // Vision (image jointe) : on force TOUJOURS le modèle gpt-5.6-luna,
-  // le seul modèle vision fiable du backend (les autres hallucinent).
+  // Vision (image jointe) : 2 modèles uniquement (gpt-5.6-luna ou claude sonnet 4),
+  // quel que soit le modèle texte sélectionné (les autres hallucinent en vision).
   const hasImages = (attachments || []).length > 0;
-  const model = hasImages ? DEFAULT_MODEL : (modelOverride || currentModel());
+  const model = hasImages ? visionModel() : (modelOverride || currentModel());
   params.set("model", model);
   params.set("uid", store.uid);
   params.set("lang", LANG);
@@ -845,6 +865,8 @@ function renderAttachmentTray() {
     n.style.cssText = "margin-left:2px; align-self:center;";
     tray.appendChild(n);
   }
+  // le sélecteur de modèle VISION apparaît seulement quand une image est jointe
+  $("#visionRow").hidden = store.attachments.length === 0;
 }
 
 /* ---------- Sidebar ---------- */
@@ -941,6 +963,7 @@ function init() {
   loadHistory();
   populateModelSelect();
   updateModelPill();
+  loadVisionModel();
 
   // si une conversation active existait, la charger
   if (store.activeId && getConversation(store.activeId)) {
@@ -991,6 +1014,12 @@ function init() {
     if (PRO_MODELS.has(m)) {
       toast("Modèle réservé aux membres PRO — l'API renverra une erreur 402.", "error");
     }
+  });
+
+  // modèle de vision (2 choix uniquement)
+  $("#visionSelect").addEventListener("change", () => {
+    saveVisionModel();
+    toast(`🖼️ Vision : ${visionModel()}`, "success");
   });
 
   // pièces jointes
