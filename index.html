@@ -26,10 +26,17 @@
   <canvas id="particles"></canvas>
 </div>
 
-<!-- ===== Bouton hamburger ===== -->
+<!-- ===== Bouton hamburger + marque ===== -->
 <button id="hamburger" class="hamburger" aria-label="Ouvrir le menu" aria-expanded="false">
   <span></span><span></span><span></span>
 </button>
+<div class="brand-chip glass">
+  <div class="brand-chip-logo">✨</div>
+  <div class="brand-chip-text">
+    <div class="brand-chip-name">Lumina Chat</div>
+    <div class="brand-chip-sub">IA Premium · Gratuite</div>
+  </div>
+</div>
 
 <!-- ===== Sidebar (menu hamburger) ===== -->
 <aside id="sidebar" class="sidebar" aria-hidden="true">
@@ -60,19 +67,6 @@
 
 <!-- ===== Application ===== -->
 <main class="app">
-  <header class="topbar glass">
-    <div class="topbar-left">
-      <div class="mini-logo">✨</div>
-      <div>
-        <div class="topbar-title">Lumina Chat</div>
-        <div class="topbar-sub">Gratuit · Sans inscription · Multi-modèles</div>
-      </div>
-    </div>
-    <div class="topbar-right">
-      <span id="modelPill" class="model-pill">gpt-5.6-luna</span>
-    </div>
-  </header>
-
   <section id="chatArea" class="chat-area">
     <!-- État vide -->
     <div id="emptyState" class="empty-state">
@@ -110,14 +104,18 @@
 
       <textarea id="input" class="input" rows="1" placeholder="Écrivez votre message… (Entrée = envoyer, Maj+Entrée = saut de ligne)"></textarea>
 
+      <button id="sendBtn" class="send-btn" aria-label="Envoyer le message">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+      </button>
+    </div>
+
+    <!-- Sélecteur de modèle : sous la saisie -->
+    <div class="model-row glass">
+      <span class="model-row-label">Modèle :</span>
       <div class="model-select-wrap">
         <svg class="model-select-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26A7 7 0 0 0 12 2z"/><path d="M9 21h6"/></svg>
         <select id="modelSelect" class="model-select" aria-label="Choisir le modèle"></select>
       </div>
-
-      <button id="sendBtn" class="send-btn" aria-label="Envoyer le message">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
-      </button>
     </div>
     <div class="composer-hint">Lumina peut faire des erreurs — vérifiez les informations importantes.</div>
   </footer>

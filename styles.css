@@ -234,6 +234,26 @@ body {
 .sidebar-overlay.show { opacity: 1; pointer-events: auto; }
 
 /* ============================================================
+   Marque à côté du hamburger
+   ============================================================ */
+.brand-chip {
+  position: fixed; top: 18px; left: 74px; z-index: 60;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 16px 6px 7px;
+  border-radius: 15px;
+  animation: fadeDown 0.5s ease both;
+  pointer-events: none;
+}
+.brand-chip-logo {
+  width: 36px; height: 36px; border-radius: 12px;
+  display: grid; place-items: center; font-size: 18px;
+  background: var(--user-grad);
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
+}
+.brand-chip-name { font-family: var(--font-display); font-weight: 700; font-size: 15px; line-height: 1.2; }
+.brand-chip-sub { font-size: 10.5px; color: var(--text-muted); line-height: 1.2; }
+
+/* ============================================================
    Layout principal
    ============================================================ */
 .app {
@@ -244,32 +264,6 @@ body {
   padding-top: 76px;
   padding-bottom: 14px;
   gap: 12px;
-}
-
-/* ---------- Topbar ---------- */
-.topbar {
-  flex: none;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 18px;
-  border-radius: 18px;
-  animation: fadeDown 0.5s ease both;
-}
-.topbar-left { display: flex; align-items: center; gap: 12px; }
-.mini-logo {
-  width: 38px; height: 38px; border-radius: 12px;
-  display: grid; place-items: center; font-size: 19px;
-  background: var(--user-grad);
-  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
-}
-.topbar-title { font-family: var(--font-display); font-weight: 700; font-size: 16px; }
-.topbar-sub { font-size: 11.5px; color: var(--text-muted); }
-.model-pill {
-  font-family: var(--font-mono); font-size: 11.5px;
-  padding: 6px 12px; border-radius: 99px;
-  background: rgba(6, 182, 212, 0.12);
-  border: 1px solid rgba(6, 182, 212, 0.3);
-  color: #67e8f9;
-  white-space: nowrap;
 }
 
 /* ---------- Zone de chat ---------- */
@@ -559,25 +553,39 @@ body {
 }
 .input::placeholder { color: var(--text-muted); }
 
+/* ---------- Rangée modèle (sous la saisie) ---------- */
+.model-row {
+  align-self: center;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 14px 6px 16px;
+  border-radius: 14px;
+  animation: fadeUp 0.4s ease both;
+}
+.model-row-label {
+  font-size: 12.5px; font-weight: 600; letter-spacing: 0.2px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* Sélecteur de modèle */
 .model-select-wrap { position: relative; flex: none; }
 .model-select-icon {
-  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-  width: 15px; height: 15px; color: var(--text-muted); pointer-events: none;
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; color: var(--text-muted); pointer-events: none;
 }
 .model-select {
   appearance: none; -webkit-appearance: none;
-  height: 44px;
-  padding: 0 34px 0 34px;
+  height: 38px;
+  padding: 0 32px 0 32px;
   font-family: var(--font-mono); font-size: 12.5px; font-weight: 500;
   color: var(--text-primary);
   background: rgba(255,255,255,0.055);
   border: 1px solid var(--border-glass);
-  border-radius: 13px;
+  border-radius: 11px;
   outline: none;
   cursor: pointer;
   transition: all 0.2s ease;
-  max-width: 170px;
+  max-width: 240px;
   text-overflow: ellipsis;
 }
 .model-select:hover { background: rgba(255,255,255,0.09); border-color: rgba(139,92,246,0.4); }
@@ -708,11 +716,11 @@ body {
    ============================================================ */
 @media (max-width: 760px) {
   .app { padding-left: 16px; padding-right: 12px; padding-top: 74px; }
-  .topbar-sub { display: none; }
-  .model-pill { display: none; }
+  .brand-chip-sub { display: none; }
   .msg { max-width: 96%; }
   .msg-bubble { font-size: 14.2px; }
-  .model-select { max-width: 128px; font-size: 11.5px; padding: 0 26px 0 30px; }
+  .model-select { max-width: 100%; font-size: 12px; }
+  .model-row { width: 100%; justify-content: center; }
   .composer { gap: 6px; padding: 10px; }
   .send-btn { width: 46px; height: 46px; }
   .empty-state h1 { font-size: 24px; }

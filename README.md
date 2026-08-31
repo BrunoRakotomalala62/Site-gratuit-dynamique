@@ -9,10 +9,10 @@ sur Vercel, branché sur l'API gratuite
 
 - 🎨 **UI premium & dynamique** : thème sombre, glassmorphism, fond animé
   (orbs aurora + particules), animations fluides, responsive mobile.
-- 🤖 **Menu déroulant multi-modèles** à côté du bouton envoyer : GPT (o1, o3,
-  gpt-5.x, gpt-4.x…), DeepSeek, Claude, Gemini, Llama, Grok, Qwen, Mixtral —
-  liste exacte des modèles gratuits testés du backend. Les modèles **PRO**
-  (`gpt-5.6-terra`, `gpt-4o`) sont signalés 🔒.
+- 🤖 **Menu déroulant multi-modèles** placé **sous la zone de saisie** : GPT
+  (o1, o3, gpt-5.x, gpt-4.x…), DeepSeek, Claude, Gemini, Llama, Grok, Qwen,
+  Mixtral — liste exacte des modèles gratuits testés du backend. Les modèles
+  **PRO** (`gpt-5.6-terra`, `gpt-4o`) sont signalés 🔒.
 - 📐 **Notation mathématique (KaTeX)** : indices, puissances, fractions à
   barre horizontale, racines, intégrales, matrices… rendus dans les réponses
   (inline `$…# Site-gratuit-dynamique — Lumina Chat ✨

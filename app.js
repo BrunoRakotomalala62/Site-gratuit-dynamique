@@ -343,16 +343,8 @@ function currentModel() {
 
 function updateModelPill() {
   const m = currentModel();
-  $("#modelPill").textContent = m;
   const isPro = PRO_MODELS.has(m);
   $("#modelSelect").classList.toggle("pro-selected", isPro);
-  $("#modelPill").style.background = isPro
-    ? "rgba(244,63,94,0.14)"
-    : "rgba(6,182,212,0.12)";
-  $("#modelPill").style.borderColor = isPro
-    ? "rgba(244,63,94,0.45)"
-    : "rgba(6,182,212,0.3)";
-  $("#modelPill").style.color = isPro ? "#fda4af" : "#67e8f9";
 }
 
 /* ---------- Historique (sidebar) ---------- */
