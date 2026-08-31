@@ -492,6 +492,55 @@ async function completeTruncatedReply(replyText) {
   return { text, completed };
 }
 
+/* ---------- Rejet de modération / réponse vide du backend ----------
+   Le backend gratuit (aichatting.net) rejette parfois les images avec un
+   message de modération anglais, ou renvoie une réponse vide. On retente
+   une fois, puis on affiche un message clair en français. */
+const MODERATION_RE = /sorry|risk level|rephrase|inappropriate|modération|contenu.*risque|immodest/i;
+
+function isModerationRejection(text) {
+  return typeof text === "string" && MODERATION_RE.test(text);
+}
+
+async function handleVisionOrEmpty(data, text, toSend) {
+  const conv = getConversation(store.activeId);
+  const chatArea = $("#chatArea");
+  const pushError = (msg) => {
+    conv.messages.push(msg);
+    chatArea.appendChild(renderMessage(msg));
+  };
+  const mod = isModerationRejection(data.reply) && toSend.length;
+
+  if (mod || !data.reply || !data.reply.trim()) {
+    // 1 seule nouvelle tentative (le backend est instable)
+    const retry = await callApi(text, toSend).catch(() => null);
+    const ok = retry && retry.success &&
+      (!isModerationRejection(retry.reply)) &&
+      retry.reply && retry.reply.trim();
+    if (ok) return retry;
+
+    if (mod) {
+      pushError({
+        role: "assistant",
+        text: "⚠️ **Image refusée par le service gratuit** (filtre de modération de aichatting.net).\n\nRéessayez avec une autre photo ou plus tard — la vision du backend gratuit est parfois instable.",
+        error: true,
+        model: data.model || currentModel(),
+        time: Date.now(),
+      });
+    } else {
+      pushError({
+        role: "assistant",
+        text: "⚠️ Le service gratuit a renvoyé une **réponse vide**. Réessayez dans quelques secondes.",
+        error: true,
+        model: data.model || currentModel(),
+        time: Date.now(),
+      });
+    }
+    return null;
+  }
+  return data;
+}
+
 /* ---------- Envoi de message ---------- */
 async function sendMessage(text, attachments) {
   const input = $("#input");
@@ -555,18 +604,23 @@ async function sendMessage(text, attachments) {
     typing.remove();
 
     if (data.success) {
-      // compléter automatiquement si le backend a coupé la réponse
-      const { text: fullText, completed } = await completeTruncatedReply(data.reply);
-      const reply = {
-        role: "assistant",
-        text: fullText || "(réponse vide)",
-        images: data.images || undefined,
-        model: data.model || currentModel(),
-        time: Date.now(),
-        completed,
-      };
-      conv.messages.push(reply);
-      chatArea.appendChild(renderMessage(reply));
+      // gérer rejet de modération / réponse vide (avec 1 retentative)
+      const finalData = await handleVisionOrEmpty(data, text, toSend);
+      if (!finalData) { /* erreur déjà affichée */ }
+      else {
+        // compléter automatiquement si le backend a coupé la réponse
+        const { text: fullText, completed } = await completeTruncatedReply(finalData.reply);
+        const reply = {
+          role: "assistant",
+          text: fullText || "(réponse vide)",
+          images: finalData.images || undefined,
+          model: finalData.model || currentModel(),
+          time: Date.now(),
+          completed,
+        };
+        conv.messages.push(reply);
+        chatArea.appendChild(renderMessage(reply));
+      }
     } else {
       const errMsg = {
         role: "assistant",
