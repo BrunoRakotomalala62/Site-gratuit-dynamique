@@ -323,25 +323,15 @@ body {
 /* ---------- Messages ---------- */
 .msg {
   display: flex;
-  gap: 12px;
+  gap: 0;
   max-width: 100%;
   animation: fadeUp 0.4s ease both;
 }
 /* Réponses de l'assistant : pleine largeur — le texte remplit l'écran */
 .msg.assistant { align-self: flex-start; width: 100%; }
 .msg.assistant .msg-bubble { flex: 1; }
-/* Messages de l'utilisateur : compacts mais plus larges qu'avant */
+/* Messages de l'utilisateur : compacts mais larges */
 .msg.user { align-self: flex-end; flex-direction: row-reverse; max-width: min(88%, 720px); }
-
-.msg-avatar {
-  flex: none;
-  width: 38px; height: 38px; border-radius: 13px;
-  display: grid; place-items: center; font-size: 18px;
-  margin-top: 2px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-}
-.msg.user .msg-avatar { background: linear-gradient(135deg, #312e81, #1e1b4b); border: 1px solid rgba(255,255,255,0.16); }
-.msg.assistant .msg-avatar { background: var(--user-grad); }
 
 .msg-bubble {
   padding: 13px 17px;

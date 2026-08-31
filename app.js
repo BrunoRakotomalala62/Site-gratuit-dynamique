@@ -270,7 +270,6 @@ function renderMessage(m) {
   const role = m.role;
   const msg = el("div", `msg ${role}${m.error ? " error" : ""}`);
 
-  const avatar = el("div", "msg-avatar", role === "user" ? "👤" : "✨");
   const bubble = el("div", "msg-bubble");
   if (m.text) {
     bubble.innerHTML = renderMarkdown(m.text);
@@ -284,17 +283,15 @@ function renderMessage(m) {
   if (time) meta.appendChild(el("span", "m-time", time));
   bubble.appendChild(meta);
 
-  msg.appendChild(avatar);
   msg.appendChild(bubble);
   return msg;
 }
 
 function renderTyping() {
   const msg = el("div", "msg assistant");
-  const avatar = el("div", "msg-avatar", "✨");
   const bubble = el("div", "msg-bubble");
   bubble.appendChild(el("div", "typing", "<span></span><span></span><span></span>"));
-  msg.append(avatar, bubble);
+  msg.appendChild(bubble);
   return msg;
 }
 
