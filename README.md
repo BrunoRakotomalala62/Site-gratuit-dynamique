@@ -13,9 +13,21 @@ sur Vercel, branché sur l'API gratuite
   gpt-5.x, gpt-4.x…), DeepSeek, Claude, Gemini, Llama, Grok, Qwen, Mixtral —
   liste exacte des modèles gratuits testés du backend. Les modèles **PRO**
   (`gpt-5.6-terra`, `gpt-4o`) sont signalés 🔒.
-- 📎 **Pièces jointes** : jusqu'à **4 images** par message (depuis l'appareil
-  avec compression automatique ≤ 512 px, ou par URL). Envoi via le paramètre
-  `image=` répété (route vision de l'API).
+- 📐 **Notation mathématique (KaTeX)** : indices, puissances, fractions à
+  barre horizontale, racines, intégrales, matrices… rendus dans les réponses
+  (inline `$…# Site-gratuit-dynamique — Lumina Chat ✨
+
+Interface de **chat IA premium, gratuite et dynamique** — site statique déployable
+sur Vercel, branché sur l'API gratuite
+[`chat-free-gpt`](https://github.com/BrunoRakotomalala62/chat-free-gpt)
+(`https://chat-free-gpt.vercel.app/api/chat`).
+
+, `\(…\)` et display `$…$`, `\[…\]`), avec normalisation
+  automatique des backslashes doublés du modèle.
+- 📎 **Pièces jointes** : jusqu'à **4 images** par message — depuis l'appareil
+  (bouton `<label>` natif + input sr-only, fiable même sur Safari/iOS, formats
+  HEIC inclus, compression automatique ≤ 512 px) ou **par URL** (champ inline).
+  Envoi via le paramètre `image=` répété (route vision de l'API).
 - 🖼️ **Réponses multi-images** : l'API renvoie un tableau `images[]` — toutes
   les images sont affichées en grille cliquable (lightbox).
 - 📜 **Menu hamburger** (en haut à gauche) : bouton **Nouvelle conversation** +
@@ -23,7 +35,7 @@ sur Vercel, branché sur l'API gratuite
   suppression, titre auto, date et modèle.
 - 🧾 **Rendu Markdown** dans les réponses : gras, listes, liens, citations,
   blocs de code avec bouton « Copier ».
-- 🌍 100 % côté client, zéro dépendance, pas de clé API.
+- 🌍 100 % côté client, zéro build, pas de clé API.
 
 ## 🚀 Déploiement
 

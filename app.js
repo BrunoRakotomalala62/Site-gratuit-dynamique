@@ -145,14 +145,31 @@ function renderInline(text) {
 function renderMarkdown(src) {
   if (!src) return "";
   const blocks = [];
-  // 1. extraire les blocs de code
-  let text = src.replace(/```([\w-]*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
-    const token = `@@CODE${blocks.length}@@`;
-    blocks.push({ lang, code });
+  let text = src;
+
+  // 1. extraire les blocs de code (protégés : jamais touchés par la suite)
+  text = text.replace(/```([\w-]*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
+    const token = `@@BLOCK${blocks.length}@@`;
+    blocks.push({ kind: "code", lang, code });
     return token;
   });
 
-  // 2. lignes
+  // 2. normaliser le LaTeX : le modèle double souvent les backslashes (\\frac → \frac)
+  text = text.replace(/\\(?=\\)/g, "");
+
+  // 3. extraire les maths « display » multi-lignes ($ … $ et \[ … \])
+  text = text.replace(/\$\$[\s\S]*?\$\$/g, (m) => {
+    const token = `@@BLOCK${blocks.length}@@`;
+    blocks.push({ kind: "math", content: m });
+    return token;
+  });
+  text = text.replace(/\\\[[\s\S]*?\\\]/g, (m) => {
+    const token = `@@BLOCK${blocks.length}@@`;
+    blocks.push({ kind: "math", content: m });
+    return token;
+  });
+
+  // 4. lignes
   const lines = text.split("\n");
   const out = [];
   let para = [];
@@ -167,6 +184,8 @@ function renderMarkdown(src) {
   for (let line of lines) {
     const t = line.trim();
     if (!t) { flush(); continue; }
+    const m = t.match(/^@@BLOCK(\d+)@@$/);
+    if (m) { flush(); out.push(buildBlock(blocks[+m[1]])); continue; }
     if (/^#{1,3}\s/.test(t)) {
       flush();
       const level = t.match(/^#+/)[0].length;
@@ -182,29 +201,44 @@ function renderMarkdown(src) {
     } else if (/^\d+\.\s+/.test(t)) {
       flush();
       out.push(`<ol><li>${renderInline(t.replace(/^\d+\.\s+/, ""))}</li></ol>`);
-    } else if (/^@@CODE\d+@@$/.test(t)) {
-      flush();
-      const idx = +t.match(/@@CODE(\d+)@@/)[1];
-      const b = blocks[idx];
-      out.push(buildCodeBlock(b.code, b.lang));
     } else {
       para.push(t);
     }
   }
   flush();
-  // blocs de code restants (ex. collés à du texte)
-  text = out.join("\n");
-  text = text.replace(/@@CODE(\d+)@@/g, (_m, i) => {
-    const b = blocks[+i];
-    return b ? buildCodeBlock(b.code, b.lang) : "";
-  });
-  return text;
+  // blocs restants (ex. collés à du texte)
+  return out.join("\n").replace(/@@BLOCK(\d+)@@/g, (_m, i) => buildBlock(blocks[+i]));
+}
+
+function buildBlock(b) {
+  if (b.kind === "code") return buildCodeBlock(b.code, b.lang);
+  return `<div class="math-block">${b.content}</div>`;
 }
 
 function buildCodeBlock(code, lang) {
   const esc = escapeHtml(code.replace(/\n$/, ""));
   return `<pre><code class="language-${escapeHtml(lang || "text")}">${esc}</code>` +
     `<button class="code-copy" data-code="${encodeURIComponent(code)}">Copier</button></pre>`;
+}
+
+/* ---------- Rendu mathématique (KaTeX) ---------- */
+const MATH_DELIMITERS = [
+  { left: "$", right: "$", display: true },
+  { left: "\\[", right: "\\]", display: true },
+  { left: "\\(", right: "\\)", display: false },
+  { left: "$", right: "$", display: false },
+];
+
+function renderMath(root) {
+  if (window.renderMathInElement) {
+    try {
+      window.renderMathInElement(root, {
+        delimiters: MATH_DELIMITERS,
+        throwOnError: false,
+        ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],
+      });
+    } catch (e) { /* KaTeX indisponible : on affiche le LaTeX brut */ }
+  }
 }
 
 /* ---------- Rendu des messages ---------- */
@@ -224,7 +258,10 @@ function renderMessage(m) {
 
   const avatar = el("div", "msg-avatar", role === "user" ? "👤" : "✨");
   const bubble = el("div", "msg-bubble");
-  if (m.text) bubble.innerHTML = renderMarkdown(m.text);
+  if (m.text) {
+    bubble.innerHTML = renderMarkdown(m.text);
+    renderMath(bubble);
+  }
   if (m.images && m.images.length) bubble.insertAdjacentHTML("beforeend", msgImagesGrid(m.images));
 
   const meta = el("div", "msg-meta");
@@ -558,6 +595,7 @@ function toJpegDataUrl(img, dim, q) {
 }
 
 async function compressImageFile(file) {
+  // 1) décoder (accepte jpg/png/gif/webp mais aussi HEIC/HEIF sur Safari)
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("Lecture du fichier impossible"));
@@ -565,15 +603,23 @@ async function compressImageFile(file) {
     reader.readAsDataURL(file);
   });
 
-  // petites images brutes conservées (png léger, gif animé court…)
-  if (file.size <= 15 * 1024 && /^data:image\/.*/.test(dataUrl) && dataUrl.length <= 20000) {
-    const probe = await loadImageFromDataUrl(dataUrl).catch(() => null);
-    if (probe && probe.naturalWidth <= 384 && probe.naturalHeight <= 384) {
-      return { name: file.name, value: dataUrl };
-    }
+  let img;
+  try {
+    img = await loadImageFromDataUrl(dataUrl);
+  } catch (e) {
+    throw new Error("Format d'image non supporté par le navigateur.");
+  }
+  if (!img.naturalWidth || !img.naturalHeight) {
+    throw new Error("Image illisible.");
   }
 
-  const img = await loadImageFromDataUrl(dataUrl);
+  // 2) petites images brutes conservées (png léger, gif animé court…)
+  if (file.size <= 15 * 1024 && dataUrl.length <= 20000 &&
+      img.naturalWidth <= 384 && img.naturalHeight <= 384) {
+    return { name: file.name, value: dataUrl };
+  }
+
+  // 3) sinon compression JPEG (HEIC inclus, car le navigateur sait le décoder)
   let best = null;
   for (const [dim, q] of COMBOS) {
     const next = toJpegDataUrl(img, dim, q);
@@ -614,8 +660,8 @@ async function addFiles(files) {
       toast(`Maximum ${MAX_IMAGES} images par message.`, "error");
       break;
     }
-    if (!/^image\/(jpeg|png|gif|webp)$/i.test(f.type)) {
-      toast(`« ${f.name} » ignoré — seules les images (jpg, png, gif, webp) sont acceptées.`, "error");
+    if (!/^image\//i.test(f.type) && !/\.(jpe?g|png|gif|webp|heic|heif|avif)$/i.test(f.name)) {
+      toast(`« ${f.name} » ignoré — ce n'est pas une image.`, "error");
       continue;
     }
     try {
@@ -835,17 +881,43 @@ function init() {
       $("#attachBtn").classList.remove("active");
     }
   };
+  // label natif : déclenche l'ouverture du sélecteur de fichiers même sur Safari/iOS
+  // (input en sr-only, jamais display:none — les .click() programmatiques y échouent)
   $("#attachFileBtn").onclick = () => {
     $("#attachMenu").hidden = true;
     $("#attachBtn").classList.remove("active");
-    $("#fileInput").click();
+    $("#attachUrlForm").hidden = true;
   };
-  $("#attachUrlBtn").onclick = () => {
+  $("#attachFileBtn").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      $("#attachMenu").hidden = true;
+      $("#attachBtn").classList.remove("active");
+      $("#fileInput").click();
+    }
+  });
+  $("#attachUrlBtn").onclick = (e) => {
+    e.stopPropagation();
+    const form = $("#attachUrlForm");
+    form.hidden = !form.hidden;
+    if (!form.hidden) {
+      positionAttachMenu();
+      $("#attachUrlInput").focus();
+    }
+  };
+  const addUrl = () => {
+    const val = $("#attachUrlInput").value.trim();
+    addImageUrl(val);
+    $("#attachUrlInput").value = "";
+    $("#attachUrlForm").hidden = true;
     $("#attachMenu").hidden = true;
     $("#attachBtn").classList.remove("active");
-    const raw = prompt("Collez l'URL de l'image :");
-    if (raw) addImageUrl(raw);
   };
+  $("#attachUrlAdd").onclick = addUrl;
+  $("#attachUrlInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); addUrl(); }
+    e.stopPropagation();
+  });
   $("#fileInput").addEventListener("change", (e) => {
     addFiles(e.target.files);
     e.target.value = "";
