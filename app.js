@@ -255,6 +255,31 @@ document.addEventListener("DOMContentLoaded", flushMathQueue);
 window.addEventListener("load", flushMathQueue);
 setTimeout(flushMathQueue, 5000); // filet de sécurité (CDN très lent)
 
+/* ---------- Thèmes dynamiques pour les réponses du bot ----------
+   Chaque réponse de l'API reçoit une palette de couleurs calculée
+   selon son contenu (mots-clés + empreinte du texte) : les titres,
+   sous-titres, gras, puces et la barre de la bulle prennent les
+   couleurs du thème. Résultat : une réponse colorée, vivante et
+   différente à chaque fois. */
+const THEME_KEYWORDS = [
+  [/conseil|astuce|routine|guide|méthode|étape/i, "emerald"],
+  [/erreur|impossible|échou|refus|⚠|❌|échec|problème/i, "flame"],
+  [/explique|défin|qu'est-ce|c'est quoi|histoire|origine/i, "ocean"],
+  [/analys|compar|différence|tableau|avantage|inconvénient/i, "royal"],
+  [/prix|coût|tarif|€|ariary|\$|budget|💰/i, "gold"],
+];
+const THEMES = ["aurora", "flame", "ocean", "emerald", "royal", "gold"];
+
+function pickTheme(text) {
+  if (!text) return "aurora";
+  for (const [re, theme] of THEME_KEYWORDS) {
+    if (re.test(text)) return theme;
+  }
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+  return THEMES[h % THEMES.length];
+}
+
 /* ---------- Rendu des messages ---------- */
 function msgImagesGrid(images) {
   if (!images || !images.length) return "";
@@ -269,6 +294,7 @@ function msgImagesGrid(images) {
 function renderMessage(m) {
   const role = m.role;
   const msg = el("div", `msg ${role}${m.error ? " error" : ""}`);
+  if (role === "assistant") msg.classList.add("theme-" + pickTheme(m.text));
 
   const bubble = el("div", "msg-bubble");
   if (m.text) {

@@ -348,13 +348,77 @@ body {
   box-shadow: 0 8px 24px rgba(76, 29, 149, 0.35);
 }
 .msg.assistant .msg-bubble {
+  position: relative;
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.055);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-bottom-left-radius: 6px;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  overflow: hidden;
 }
+/* Barre dégradée animée en haut de la bulle (couleurs du thème) */
+.msg.assistant .msg-bubble::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--m-bar, linear-gradient(90deg, #8b5cf6, #06b6d4, #f0abfc));
+  background-size: 200% auto;
+  animation: gradMove 6s linear infinite;
+  opacity: 0.95;
+}
+@keyframes gradMove { to { background-position: 200% center; } }
+
+/* ====== Palettes dynamiques (définies par le contenu de la réponse) ====== */
+.msg.assistant.theme-aurora {
+  --m-h1: #c4b5fd; --m-h2: #67e8f9; --m-h3: #f0abfc;
+  --m-strong: #e9d5ff; --m-bullet: #a78bfa; --m-quote: #06b6d4; --m-link: #7dd3fc;
+  --m-bar: linear-gradient(90deg, #8b5cf6, #06b6d4, #f0abfc);
+}
+.msg.assistant.theme-flame {
+  --m-h1: #fca5a5; --m-h2: #fdba74; --m-h3: #fda4af;
+  --m-strong: #fecaca; --m-bullet: #fb7185; --m-quote: #f97316; --m-link: #fdba74;
+  --m-bar: linear-gradient(90deg, #ef4444, #f97316, #fbbf24);
+}
+.msg.assistant.theme-ocean {
+  --m-h1: #7dd3fc; --m-h2: #5eead4; --m-h3: #93c5fd;
+  --m-strong: #bae6fd; --m-bullet: #38bdf8; --m-quote: #2dd4bf; --m-link: #7dd3fc;
+  --m-bar: linear-gradient(90deg, #0ea5e9, #2dd4bf, #93c5fd);
+}
+.msg.assistant.theme-emerald {
+  --m-h1: #6ee7b7; --m-h2: #a7f3d0; --m-h3: #86efac;
+  --m-strong: #d1fae5; --m-bullet: #34d399; --m-quote: #4ade80; --m-link: #6ee7b7;
+  --m-bar: linear-gradient(90deg, #10b981, #84cc16, #6ee7b7);
+}
+.msg.assistant.theme-royal {
+  --m-h1: #c084fc; --m-h2: #f0abfc; --m-h3: #a5b4fc;
+  --m-strong: #e9d5ff; --m-bullet: #a855f7; --m-quote: #c084fc; --m-link: #c4b5fd;
+  --m-bar: linear-gradient(90deg, #8b5cf6, #ec4899, #a5b4fc);
+}
+.msg.assistant.theme-gold {
+  --m-h1: #fde047; --m-h2: #fbbf24; --m-h3: #fcd34d;
+  --m-strong: #fef3c7; --m-bullet: #f59e0b; --m-quote: #fbbf24; --m-link: #fde047;
+  --m-bar: linear-gradient(90deg, #f59e0b, #fbbf24, #fde047);
+}
+
+/* Application des couleurs du thème sur les éléments de la réponse */
+.msg.assistant .msg-bubble h1 {
+  background: var(--m-bar, linear-gradient(90deg, #8b5cf6, #06b6d4));
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  background-size: 200% auto;
+  animation: gradMove 6s linear infinite;
+}
+.msg.assistant .msg-bubble h2 { color: var(--m-h2, #7dd3fc); }
+.msg.assistant .msg-bubble h3 { color: var(--m-h3, #f0abfc); }
+.msg.assistant .msg-bubble strong { color: var(--m-strong, #e9d5ff); }
+.msg.assistant .msg-bubble li::marker { color: var(--m-bullet, #a78bfa); }
+.msg.assistant .msg-bubble a { color: var(--m-link, #7dd3fc); }
+.msg.assistant .msg-bubble blockquote {
+  border-left-color: var(--m-quote, #06b6d4);
+  background: rgba(255, 255, 255, 0.03);
+}
+.msg.assistant .msg-bubble code.inline { color: var(--m-bullet, #c4b5fd); }
 
 .msg.error .msg-bubble {
   background: rgba(244, 63, 94, 0.1);
@@ -392,7 +456,6 @@ body {
 .msg-bubble :where(p) { margin: 0 0 10px; }
 .msg-bubble :where(p:last-child) { margin-bottom: 0; }
 .msg-bubble strong { color: #fff; font-weight: 700; }
-.msg.assistant .msg-bubble strong { color: #e9d5ff; }
 .msg-bubble em { color: inherit; }
 .msg-bubble a { color: #7dd3fc; text-decoration: underline; text-underline-offset: 3px; }
 .msg-bubble h1, .msg-bubble h2, .msg-bubble h3 {
@@ -404,10 +467,10 @@ body {
 .msg-bubble li { margin: 3px 0; }
 .msg-bubble hr { border: none; border-top: 1px solid rgba(255,255,255,0.14); margin: 12px 0; }
 .msg-bubble blockquote {
-  border-left: 3px solid var(--grad-3);
+  border-left: 3px solid var(--m-quote, var(--grad-3));
   padding: 2px 12px; margin: 8px 0;
   color: var(--text-secondary);
-  background: rgba(6, 182, 212, 0.06);
+  background: var(--m-quote-bg, rgba(6, 182, 212, 0.06));
   border-radius: 0 10px 10px 0;
 }
 .msg-bubble code.inline {
@@ -415,7 +478,7 @@ body {
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255,255,255,0.12);
   padding: 1.5px 6px; border-radius: 6px;
-  color: #c4b5fd;
+  color: var(--m-bullet, #c4b5fd);
 }
 .msg-bubble pre {
   position: relative;
