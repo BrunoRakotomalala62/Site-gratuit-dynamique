@@ -230,16 +230,30 @@ const MATH_DELIMITERS = [
 ];
 
 function renderMath(root) {
-  if (window.renderMathInElement) {
-    try {
-      window.renderMathInElement(root, {
-        delimiters: MATH_DELIMITERS,
-        throwOnError: false,
-        ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],
-      });
-    } catch (e) { /* KaTeX indisponible : on affiche le LaTeX brut */ }
+  if (!window.renderMathInElement) {
+    // KaTeX pas encore chargé (CDN lent/indisponible) : file d'attente,
+    // l'application continue de fonctionner normalement.
+    (window.__mathQueue || (window.__mathQueue = [])).push(root);
+    return;
   }
+  try {
+    window.renderMathInElement(root, {
+      delimiters: MATH_DELIMITERS,
+      throwOnError: false,
+      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code", "option"],
+    });
+  } catch (e) { /* KaTeX en erreur : le LaTeX reste affiché en texte brut */ }
 }
+
+function flushMathQueue() {
+  if (!window.renderMathInElement || !window.__mathQueue || !window.__mathQueue.length) return;
+  const q = window.__mathQueue;
+  window.__mathQueue = [];
+  q.forEach(renderMath);
+}
+document.addEventListener("DOMContentLoaded", flushMathQueue);
+window.addEventListener("load", flushMathQueue);
+setTimeout(flushMathQueue, 5000); // filet de sécurité (CDN très lent)
 
 /* ---------- Rendu des messages ---------- */
 function msgImagesGrid(images) {
@@ -798,15 +812,6 @@ function startParticles() {
   })();
 }
 
-/* ---------- Menu pièces jointes ---------- */
-function positionAttachMenu() {
-  const btn = $("#attachBtn");
-  const menu = $("#attachMenu");
-  const r = btn.getBoundingClientRect();
-  menu.style.top = Math.max(8, r.top - menu.offsetHeight - 10) + "px";
-  menu.style.left = r.left + "px";
-}
-
 /* ---------- Init ---------- */
 function init() {
   // uid persistant
@@ -869,68 +874,35 @@ function init() {
   });
 
   // pièces jointes
-  $("#attachBtn").onclick = (e) => {
-    e.stopPropagation();
-    const menu = $("#attachMenu");
-    if (menu.hidden) {
-      menu.hidden = false;
-      positionAttachMenu();
-      $("#attachBtn").classList.add("active");
-    } else {
-      menu.hidden = true;
-      $("#attachBtn").classList.remove("active");
-    }
-  };
-  // label natif : déclenche l'ouverture du sélecteur de fichiers même sur Safari/iOS
-  // (input en sr-only, jamais display:none — les .click() programmatiques y échouent)
-  $("#attachFileBtn").onclick = () => {
-    $("#attachMenu").hidden = true;
-    $("#attachBtn").classList.remove("active");
-    $("#attachUrlForm").hidden = true;
-  };
-  $("#attachFileBtn").addEventListener("keydown", (e) => {
+  // Le trombone est un <label for="fileInput"> natif : le navigateur ouvre
+  // lui-même le sélecteur de fichiers (aucun JS, fiable partout, même Safari/iOS).
+  // Support clavier (Enter/Espace) pour le label :
+  $("#attachBtn").addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      $("#attachMenu").hidden = true;
-      $("#attachBtn").classList.remove("active");
       $("#fileInput").click();
     }
   });
-  $("#attachUrlBtn").onclick = (e) => {
-    e.stopPropagation();
-    const form = $("#attachUrlForm");
-    form.hidden = !form.hidden;
-    if (!form.hidden) {
-      positionAttachMenu();
-      $("#attachUrlInput").focus();
-    }
+  // URL : bouton dédié qui affiche une barre inline
+  $("#urlBtn").onclick = () => {
+    const row = $("#urlRow");
+    row.hidden = !row.hidden;
+    if (!row.hidden) $("#urlInput").focus();
   };
   const addUrl = () => {
-    const val = $("#attachUrlInput").value.trim();
+    const val = $("#urlInput").value.trim();
+    if (!val) return;
     addImageUrl(val);
-    $("#attachUrlInput").value = "";
-    $("#attachUrlForm").hidden = true;
-    $("#attachMenu").hidden = true;
-    $("#attachBtn").classList.remove("active");
+    $("#urlInput").value = "";
+    $("#urlRow").hidden = true;
   };
-  $("#attachUrlAdd").onclick = addUrl;
-  $("#attachUrlInput").addEventListener("keydown", (e) => {
+  $("#urlAdd").onclick = addUrl;
+  $("#urlInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); addUrl(); }
-    e.stopPropagation();
   });
   $("#fileInput").addEventListener("change", (e) => {
     addFiles(e.target.files);
     e.target.value = "";
-  });
-  document.addEventListener("click", (e) => {
-    const menu = $("#attachMenu");
-    if (!menu.hidden && !menu.contains(e.target) && e.target !== $("#attachBtn")) {
-      menu.hidden = true;
-      $("#attachBtn").classList.remove("active");
-    }
-  });
-  window.addEventListener("resize", () => {
-    if (!$("#attachMenu").hidden) positionAttachMenu();
   });
 
   // lightbox
@@ -965,4 +937,20 @@ function init() {
 // expose pour le HTML inline (lightbox des images markdown)
 window.Lumina = { openImage };
 
-document.addEventListener("DOMContentLoaded", init);
+// Affichage des erreurs JS (débogage à distance)
+window.addEventListener("error", (e) => {
+  if (e && e.message && !e.filename) return; // erreurs de ressource : silencieuses
+  try {
+    toast("⚠️ Erreur technique : " + (e.message || "inconnue"), "error");
+  } catch (err) { /* noop */ }
+});
+
+// L'app.js est chargé à la fin du <body> : le DOM est déjà analysé,
+// on initialise immédiatement (sans attendre DOMContentLoaded ni KaTeX).
+try {
+  init();
+} catch (err) {
+  try {
+    toast("⚠️ Erreur d'initialisation : " + (err && err.message ? err.message : err), "error");
+  } catch (e2) { /* noop */ }
+}

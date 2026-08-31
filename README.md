@@ -24,9 +24,11 @@ sur Vercel, branché sur l'API gratuite
 
 , `\(…\)` et display `$…$`, `\[…\]`), avec normalisation
   automatique des backslashes doublés du modèle.
-- 📎 **Pièces jointes** : jusqu'à **4 images** par message — depuis l'appareil
-  (bouton `<label>` natif + input sr-only, fiable même sur Safari/iOS, formats
-  HEIC inclus, compression automatique ≤ 512 px) ou **par URL** (champ inline).
+- 📎 **Pièces jointes** : jusqu'à **4 images** par message — le bouton
+  trombone est un `<label>` natif (le navigateur ouvre directement le
+  sélecteur de fichiers, zéro JS : fiable sur tous les navigateurs, Safari/iOS
+  inclus), formats HEIC/HEIF acceptés, compression automatique ≤ 512 px.
+  Un bouton lien 🔗 dédié ajoute une image **par URL** (barre inline).
   Envoi via le paramètre `image=` répété (route vision de l'API).
 - 🖼️ **Réponses multi-images** : l'API renvoie un tableau `images[]` — toutes
   les images sont affichées en grille cliquable (lightbox).

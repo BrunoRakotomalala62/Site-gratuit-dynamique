@@ -609,58 +609,39 @@ body {
 
 .composer-hint { text-align: center; font-size: 11px; color: var(--text-muted); }
 
-/* ---------- Menu pièces jointes ---------- */
-.attach-menu {
-  position: fixed;
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 8px;
+/* ---------- Barre « image par URL » ---------- */
+.url-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
   border-radius: var(--radius-md);
-  z-index: 70;
-  animation: fadeUp 0.2s ease both;
-  background: rgba(12, 14, 28, 0.92);
+  animation: fadeUp 0.22s ease both;
 }
-.attach-option {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px;
-  border: none; border-radius: 10px;
-  background: transparent;
-  color: var(--text-primary);
-  font-family: var(--font-body); font-size: 13.5px; font-weight: 500;
-  cursor: pointer;
-  transition: background 0.18s ease;
-  white-space: nowrap;
-  user-select: none;
-}
-.attach-option svg { width: 17px; height: 17px; color: var(--accent); flex: none; }
-.attach-option:hover, .attach-option:focus-visible { background: rgba(255,255,255,0.08); outline: none; }
-
-.attach-url-row { display: flex; flex-direction: column; }
-.attach-url-form { display: flex; gap: 6px; padding: 4px 4px 6px; }
-.attach-url-input {
+.url-row svg { width: 16px; height: 16px; color: var(--accent); flex: none; }
+.url-input {
   flex: 1; min-width: 0;
-  padding: 8px 11px;
-  font-family: var(--font-body); font-size: 12.5px;
+  padding: 8px 12px;
+  font-family: var(--font-body); font-size: 13px;
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 9px;
+  border-radius: 10px;
   outline: none;
   transition: border-color 0.2s ease;
 }
-.attach-url-input:focus { border-color: rgba(139, 92, 246, 0.6); }
-.attach-url-input::placeholder { color: var(--text-muted); }
-.attach-url-add {
+.url-input:focus { border-color: rgba(139, 92, 246, 0.6); }
+.url-input::placeholder { color: var(--text-muted); }
+.url-add {
   flex: none;
-  padding: 0 13px;
-  font-family: var(--font-body); font-size: 12.5px; font-weight: 600;
+  padding: 8px 16px;
+  font-family: var(--font-body); font-size: 13px; font-weight: 600;
   color: #fff;
   background: var(--user-grad);
-  border: none; border-radius: 9px;
+  border: none; border-radius: 10px;
   cursor: pointer;
   transition: filter 0.2s ease, transform 0.15s ease;
 }
-.attach-url-add:hover { filter: brightness(1.15); }
-.attach-url-add:active { transform: scale(0.95); }
+.url-add:hover { filter: brightness(1.15); }
+.url-add:active { transform: scale(0.95); }
 
 /* ============================================================
    Lightbox
