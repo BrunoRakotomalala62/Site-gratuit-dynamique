@@ -453,12 +453,14 @@ function touchConversation(id) {
 /* ---------- Réponses coupées par le backend gratuit ----------
    Le service gratuit (aichatting.net) plafonne les réponses longues
    (~4 600 caractères, vérifié). On détecte la coupure et on enchaîne
-   automatiquement des demandes « continue » pour compléter la réponse. */
+   automatiquement des demandes « continue » pour compléter la réponse
+   (jusqu'à 5 enchaînements : convient aux longues résolutions de maths,
+   code, etc.). */
 function isTruncated(text) {
   const t = (text || "").trim();
-  if (t.length < 3000) return false;           // sous la limite : complète
+  if (t.length < 1200) return false;           // réponse courte : considérée complète
   const last = t[t.length - 1];
-  if (".?!…»\"'".includes(last)) return false;  // fin de phrase normale
+  if (".?!…»\"'$".includes(last)) return false; // fin de phrase/formule normale
   const fences = (t.match(/```/g) || []).length;
   if (fences % 2 === 1) return true;            // bloc de code non fermé
   return true;                                  // fin brutale (lettre, virgule, tiret…)
@@ -473,14 +475,19 @@ async function completeTruncatedReply(replyText) {
   let text = replyText || "";
   let completed = false;
   let guard = 0;
-  while (isTruncated(text) && guard < 3) {
+  while (isTruncated(text) && guard < 5) {     // jusqu'à 5 enchaînements
     guard++;
-    const cont = await callApi(buildContinuePrompt(text), []);
+    let cont = await callApi(buildContinuePrompt(text), []);
+    if (!cont.success) {
+      // échec (ex. modèle PRO) : on retente avec le modèle gratuit par défaut
+      cont = await callApi(buildContinuePrompt(text), [], DEFAULT_MODEL);
+    }
     if (!cont.success || !cont.reply || !cont.reply.trim()) break;
-    const next = text + "\n" + cont.reply.trim();
-    if (next.length <= text.length + 150) break; // suite quasi vide → stop
-    text = next;
+    const addition = cont.reply.trim();
+    text = text + "\n" + addition;             // on ajoute TOUJOURS la suite
     completed = true;
+    // la suite est courte ET se termine proprement → réponse finie
+    if (addition.length < 120 && !isTruncated(addition)) break;
   }
   return { text, completed };
 }
@@ -594,10 +601,10 @@ async function sendMessage(text, attachments) {
   }
 }
 
-async function callApi(text, attachments) {
+async function callApi(text, attachments, modelOverride) {
   const params = new URLSearchParams();
   if (text.trim()) params.set("prompt", text.trim().slice(0, 4000));
-  params.set("model", currentModel());
+  params.set("model", modelOverride || currentModel());
   params.set("uid", store.uid);
   params.set("lang", LANG);
 
