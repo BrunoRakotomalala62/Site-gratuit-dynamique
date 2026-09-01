@@ -252,6 +252,26 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   t("INTÉGRATION : vérification incomplète → titre « complétée par l'IA »", replyMsg4.figure && replyMsg4.figure.title === "construction géométrique complétée par l'IA", JSON.stringify(replyMsg4.figure));
   delete global.fetch;
 
+  // --- mémoire des photos d'exercice ---
+  console.log("--- mémoire des photos (resolveSendImages) ---");
+  const convPhoto = { id: "p1", messages: [
+    { role: "user", text: "Fais cet exercice", images: ["data:image/png;base64,AAAA"] },
+  ], lastImageRef: 0 };
+  const rMem = L.resolveSendImages([], convPhoto);
+  t("question suivante → photo renvoyée automatiquement", rMem.length === 1 && rMem[0].value === "data:image/png;base64,AAAA" && rMem[0].name === "photo (mémoire)", JSON.stringify(rMem));
+  t("rememberedImages = mêmes images", L.rememberedImages(convPhoto).length === 1, JSON.stringify(L.rememberedImages(convPhoto)));
+  const newImg = { type: "data", name: "nouvelle.png", value: "data:image/png;base64,BBBB" };
+  const rNew = L.resolveSendImages([newImg], convPhoto);
+  t("nouvelle photo jointe → remplace la mémoire", rNew.length === 1 && rNew[0].value === "data:image/png;base64,BBBB", JSON.stringify(rNew));
+  const convSans = { id: "p2", messages: [] };
+  t("sans mémoire → rien", L.resolveSendImages([], convSans).length === 0);
+  const convStale = { id: "p3", messages: [], lastImageRef: 5 };
+  t("référence périmée → rien (pas de crash)", L.resolveSendImages([], convStale).length === 0);
+  const convMsgSansImg = { id: "p4", messages: [{ role: "user", text: "bonjour", images: [] }], lastImageRef: 0 };
+  t("message sans image → rien", L.resolveSendImages([], convMsgSansImg).length === 0);
+  L.clearImageMemory(convPhoto);
+  t("clearImageMemory oublie la photo", convPhoto.lastImageRef === undefined, String(convPhoto.lastImageRef));
+
   console.log("");
   console.log(pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);

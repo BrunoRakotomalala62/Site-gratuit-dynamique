@@ -1059,6 +1059,59 @@ async function handleVisionOrEmpty(data, text, toSend) {
 }
 
 /* ---------- Envoi de message ---------- */
+/* ----------------------------------------------------------------
+ * Mémoire des photos d'exercice
+ * ----------------------------------------------------------------
+ * Quand l'utilisateur envoie une photo, elle est CONSERVÉE dans la
+ * conversation : les questions suivantes (« dans cette photo, où est la
+ * solution ? », « et la question 3 ? »…) renvoient automatiquement la
+ * photo au bot — sinon il répond « je ne vois pas de photo jointe ».
+ * Une nouvelle photo jointe remplace la mémoire ; le bouton ✕ de la
+ * pilule l'oublie.
+ * ---------------------------------------------------------------- */
+
+/* Images à envoyer : les nouvelles jointes, sinon la mémoire de la
+   conversation (dernière photo, jusqu'à MAX_IMAGES_PER_REQUEST). */
+function resolveSendImages(attachments, conv) {
+  if (attachments && attachments.length) return attachments;
+  if (!conv || !conv.messages || typeof conv.lastImageRef !== "number") return [];
+  const msg = conv.messages[conv.lastImageRef];
+  if (!msg || !msg.images || !msg.images.length) return [];
+  return msg.images
+    .slice(0, MAX_IMAGES_PER_REQUEST)
+    .map((v) => ({ type: "data", name: "photo (mémoire)", value: v }));
+}
+
+/* Images mémorisées de la conversation (affichage pilule). */
+function rememberedImages(conv) {
+  return resolveSendImages([], conv);
+}
+
+function clearImageMemory(conv) {
+  if (conv) conv.lastImageRef = undefined;
+  renderAttachmentTray();
+}
+
+/* Pilule « 📷 Exercice en mémoire — ✕ » dans la barre de saisie. */
+function renderImageMemoryPill(conv) {
+  const tray = $("#attachmentTray");
+  if (!tray || !tray.querySelector || !tray.prepend) return;
+  const old = tray.querySelector(".attach-chip.memory");
+  if (old) old.remove();
+  const mem = rememberedImages(conv);
+  if (!mem.length) return;
+  const chip = el("div", "attach-chip memory", "");
+  chip.appendChild(el("img", "", ""));
+  chip.querySelector("img").src = mem[0].value;
+  chip.appendChild(el("span", "ac-name", escapeHtml("Exercice en mémoire")));
+  const rm = el("button", "ac-remove", "✕");
+  rm.setAttribute("aria-label", "Oublier la photo (ne plus la renvoyer)");
+  rm.title = "Oublier la photo";
+  rm.onclick = () => clearImageMemory(conv);
+  chip.appendChild(rm);
+  tray.prepend(chip);
+}
+
 async function sendMessage(text, attachments) {
   const input = $("#input");
   const sendBtn = $("#sendBtn");
@@ -1067,11 +1120,6 @@ async function sendMessage(text, attachments) {
 
   if (store.sending) return;
   if (!text.trim() && (!attachments || !attachments.length)) return;
-
-  // Compression au budget POST (qualité haute : ≤ 1024 px, q 0.8).
-  // Le repli GET (ancienne API) re-compressera au budget URL si besoin.
-  const toSend = attachments.map((a) => ({ ...a }));
-  await fitAttachmentsToBudget(toSend, BODY_BUDGET, BODY_COMBOS, PER_IMAGE_BODY);
 
   // conversation courante
   let conv = getConversation(store.activeId);
@@ -1084,16 +1132,24 @@ async function sendMessage(text, attachments) {
     store.activeId = conv.id;
   }
 
+  // Compression au budget POST (qualité haute : ≤ 1024 px, q 0.8).
+  // Le repli GET (ancienne API) re-compressera au budget URL si besoin.
+  // Sans nouvelle photo, la DERNIÈRE photo de la conversation est
+  // automatiquement renvoyée (mémoire des photos d'exercice).
+  const toSend = resolveSendImages(attachments, conv).map((a) => ({ ...a }));
+  await fitAttachmentsToBudget(toSend, BODY_BUDGET, BODY_COMBOS, PER_IMAGE_BODY);
+
   empty.style.display = "none";
 
   const userMsg = {
     role: "user",
     text: text.trim(),
-    images: toSend.map((a) => a.value),
+    images: (attachments || []).map((a) => a.value), // nouvelles photos seulement (affichage)
     model: toSend.length ? visionModel() : currentModel(), // la vision n'utilise que les 2 modèles dédiés
     time: Date.now(),
   };
   conv.messages.push(userMsg);
+  if (userMsg.images.length) conv.lastImageRef = conv.messages.length - 1;
   if (!conv.title) conv.title = text.trim().slice(0, 46) || "Conversation";
   conv.model = currentModel();
   touchConversation(conv.id);
@@ -1418,6 +1474,8 @@ function renderAttachmentTray() {
     chip.appendChild(rm);
     tray.appendChild(chip);
   });
+  // pilule « 📷 Exercice en mémoire » (photo renvoyée automatiquement)
+  renderImageMemoryPill(getConversation(store.activeId));
   if (store.attachments.length) {
     const n = el("span", "ac-count", `${store.attachments.length}/${MAX_IMAGES}`);
     n.style.cssText = "margin-left:2px; align-self:center;";
@@ -1658,6 +1716,7 @@ window.Lumina = {
   detectFigureRequest, normalizeExpression, extractExpression, extractTangent,
   extractLine, hasFigureIntent, cleanSubject, figureSvgToDataUri, buildFigureBlock,
   fetchFigure, maybeBuildFigure, detectGeometryRequest, fetchGeoFigure,
+  resolveSendImages, rememberedImages, clearImageMemory, renderImageMemoryPill,
 };
 
 // Affichage des erreurs JS (débogage à distance)

@@ -873,3 +873,11 @@ body {
   .model-select { max-width: 100%; }
   .chat-area { gap: 14px; }
 }
+
+/* Pilule « Exercice en mémoire » (photo renvoyée automatiquement aux
+   questions suivantes) */
+.attach-chip.memory {
+  border: 1px dashed rgba(52, 211, 153, 0.55);
+  background: rgba(52, 211, 153, 0.08);
+}
+.attach-chip.memory .ac-name { color: #34d399; }

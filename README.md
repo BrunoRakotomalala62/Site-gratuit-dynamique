@@ -97,6 +97,11 @@ sur Vercel, branché sur l'API gratuite
   dessine quand même un SVG (légende honnête « Figure générée par IA
   (approximative) ») — toute demande de figure géométrique aboutit à une
   image.
+- 📷 **Mémoire des photos d'exercice** : la photo jointe est conservée dans
+  la conversation et renvoyée automatiquement avec les questions suivantes
+  (« dans cette photo, où est la solution ? »…) — le bot ne répond plus
+  « je ne vois pas de photo jointe ». Une pilule « 📷 Exercice en mémoire »
+  l'affiche ; une nouvelle photo la remplace, le bouton ✕ l'oublie.
 - 🌍 100 % côté client, zéro build, pas de clé API.
 
 ## 🚀 Déploiement
