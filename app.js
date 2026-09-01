@@ -183,6 +183,29 @@ function wrapBareEnvironments(content) {
   return String(content).replace(LATEX_ENV_RE, (m) => "\\[" + m + "\\]");
 }
 
+/* AJOUT — rendu fiable des maths de la nouvelle API :
+   - normalise les backslashes doublés des commandes (\\frac → \frac),
+     comme l'étape 2 de renderMarkdown, mais pour les blocs ```latex/```tex
+   - garantit des délimiteurs (\[ … \]) autour d'un LaTeX « nu »
+     (ex. \frac{5}{8} seul, sans $ ni \[ … \]) pour que KaTeX le rende. */
+function normalizeMathBackslashes(content) {
+  return String(content).replace(/\\(?=\\(?=[a-zA-Z]))/g, "");
+}
+
+function ensureMathDelimiters(content) {
+  const s = String(content);
+  return /\$|\\\[|\\\(/.test(s) ? s : "\\[" + s + "\\]";
+}
+
+/* AJOUT — consigne LaTeX pour les modèles UnlimitedAI quand la question
+   semble mathématique (pour obtenir la même qualité de notation que le
+   premier backend : fraction à barre horizontale, puissances, indices…). */
+const MATH_PROMPT_HINT = "\n\n(Consigne de formatage : si ta réponse contient des formules mathématiques, écris-les en notation LaTeX avec délimiteurs — $...$ en inline, $$...$$ ou \\[...\\] pour une formule affichée — fractions avec \\frac{num}{dén}, puissances avec ^, indices avec _.)";
+
+function looksMathy(text) {
+  return /(calcul|résoud|resoud|équation|equation|intégrale|integrale|dériv|derive|fraction|racine|math|algèbre|algebre|somme|matrice|[0-9]\s*[+\-*/÷×]\s*[0-9]|frac\{|\^2)/i.test(text);
+}
+
 function renderMarkdown(src) {
   if (!src) return "";
   const blocks = [];
@@ -195,7 +218,8 @@ function renderMarkdown(src) {
     const token = `@@BLOCK${blocks.length}@@`;
     const l = String(lang || "").toLowerCase();
     if (l === "latex" || l === "tex" || l === "math" || l === "katex") {
-      blocks.push({ kind: "math", content: wrapBareEnvironments(code) });
+      blocks.push({ kind: "math",
+        content: ensureMathDelimiters(normalizeMathBackslashes(wrapBareEnvironments(code))) });
     } else {
       blocks.push({ kind: "code", lang, code });
     }
@@ -1476,6 +1500,11 @@ async function callApi(text, attachments, modelOverride) {
   const ENDPOINT = useUAI ? API_URL_2 : API_URL;
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST);
 
+  // AJOUT : consigne LaTeX pour les modèles UnlimitedAI sur question mathématique
+  // (fraction à barre horizontale, puissances ^, indices _ — comme le premier backend).
+  let promptText = text.trim().slice(0, 4000);
+  if (useUAI && looksMathy(promptText)) promptText += MATH_PROMPT_HINT;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90000);
   const fetchOpts = {
@@ -1518,7 +1547,7 @@ async function callApi(text, attachments, modelOverride) {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({
-            prompt: text.trim().slice(0, 4000),
+            prompt: promptText,
             model,
             uid: store.uid,
             lang: LANG,
@@ -1542,7 +1571,7 @@ async function callApi(text, attachments, modelOverride) {
         Math.floor((URL_BUDGET * 0.95) / Math.max(1, forGet.length))
       );
       const params = new URLSearchParams();
-      params.set("prompt", text.trim().slice(0, 4000));
+      params.set("prompt", promptText);
       params.set("model", model);
       params.set("uid", store.uid);
       params.set("lang", LANG);
@@ -1552,7 +1581,7 @@ async function callApi(text, attachments, modelOverride) {
 
     // --- Texte seul : GET (rapide, sans corps) ---
     const params = new URLSearchParams();
-    params.set("prompt", text.trim().slice(0, 4000));
+    params.set("prompt", promptText);
     params.set("model", model);
     params.set("uid", store.uid);
     params.set("lang", LANG);
