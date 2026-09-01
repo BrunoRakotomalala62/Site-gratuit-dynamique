@@ -724,6 +724,17 @@ function buildFigureBlock(svg, title, opts) {
 
 /* Construction asynchrone de la figure, à la fin de la réponse du bot. */
 async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, hasImages) {
+  // Question sur la figure EXISTANTE (« explique-moi cette figure »,
+  // « pourquoi la tangente… ? ») sans demande de nouveau dessin → on ne
+  // reconstruit pas une figure par-dessus l'ancienne (la question partira
+  // avec l'image de la figure mémorisée).
+  const hasFig = !!(conv && (conv.lastFigure || (conv.messages || []).some((m) => m.figure)));
+  const u = String(userText || "");
+  if (hasFig && /expliqu|pourquoi|comment|que\s+repr|quel|quelle|question|signifi|aide/i.test(u) &&
+      !/trace|dessine|construi|repr[eé]sente|graphique|courbe/i.test(u)) {
+    return;
+  }
+
   // 0) Géométrie (/api/geo) : énoncé avec constructions successives
   //    (droites, perpendiculaires, cercles, transformations…) → UNE figure
   //    cumulative. Moteur déterministe exact d'abord, repli IA sinon.

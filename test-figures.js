@@ -255,6 +255,19 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   t("INTÉGRATION : vérification incomplète → titre « complétée par l'IA »", replyMsg4.figure && replyMsg4.figure.title === "construction géométrique complétée par l'IA", JSON.stringify(replyMsg4.figure));
   delete global.fetch;
 
+  // question sur une figure EXISTANTE → pas de nouvelle figure
+  const urls5 = [];
+  global.fetch = async (url) => { urls5.push(String(url)); return { json: async () => ({ success: true, svg: "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\" fill=\"white\"/></svg>" }) }; };
+  const conv5 = { id: "c5", messages: [{ role: "assistant", text: "voici la figure", figure: { svg: "<svg></svg>", title: "courbe" } }] };
+  const replyMsg5 = { role: "assistant", text: "ok" };
+  const replyEl5 = { querySelector: () => ({ appendChild: () => {}, isConnected: true, replaceWith: () => {}, remove: () => {} }) };
+  global.document.querySelector = () => ({ scrollTo: () => {}, style: {} });
+  await window.Lumina.maybeBuildFigure("Explique-moi cette figure : pourquoi la tangente coupe-t-elle en un seul point ?", "La parabole est f(x)=x²-2x+1, tangente y=2x-3.", conv5, replyMsg5, replyEl5, false);
+  t("INTÉGRATION : question sur la figure → AUCUNE nouvelle figure", urls5.length === 0, String(urls5.length));
+  await window.Lumina.maybeBuildFigure("Trace aussi la courbe de g(x)=x+1", "ok", conv5, replyMsg5, replyEl5, false);
+  t("INTÉGRATION : nouvelle demande de dessin → figure construite", urls5.length === 1, String(urls5.length));
+  delete global.fetch;
+
   // --- mémoire des photos d'exercice ---
   console.log("--- mémoire des photos (resolveSendImages) ---");
   const convPhoto = { id: "p1", messages: [
