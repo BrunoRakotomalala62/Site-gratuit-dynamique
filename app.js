@@ -1557,12 +1557,20 @@ function init() {
 
   const input = $("#input");
   input.addEventListener("input", () => autoResize(input));
+  // Sur écran tactile (mobile/tablette) le clavier virtuel n'a PAS de touche
+  // Maj : « Entrée » = saut de ligne (envoi via le bouton ➤ ou Ctrl+Entrée).
+  // Sur ordinateur : Entrée = envoyer, Maj+Entrée = saut de ligne.
+  const isTouch = (typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches) || "ontouchstart" in window;
+  if (isTouch) {
+    input.placeholder = "Écrivez votre message… (Entrée = saut de ligne · bouton ➤ pour envoyer)";
+  }
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      const imgs = [...store.attachments];
-      sendMessage(input.value, imgs);
-    }
+    if (e.key !== "Enter" || e.isComposing) return;
+    const sendShortcut = isTouch ? e.ctrlKey || e.metaKey : !e.shiftKey;
+    if (!sendShortcut) return;
+    e.preventDefault();
+    const imgs = [...store.attachments];
+    sendMessage(input.value, imgs);
   });
 
   // modèle
