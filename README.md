@@ -13,6 +13,13 @@ qwen) est routé vers une seconde API
 `chat-free-gpt` et toute la logique existante restent inchangées — le choix
 de l'API se fait automatiquement selon le modèle sélectionné.
 
+**Vision** : quand une image est jointe, le site utilise le modèle choisi
+dans le menu si celui-ci est compatible image (gpt-5.6-luna, claude sonnet 4
++ les modèles vision UnlimitedAI : claude, chatgpt, gemini, grok,
+perplexity) ; sinon il se replie sur le sélecteur « 🖼️ Vision » (lui aussi
+rempli avec tous les modèles vision). Les images sont envoyées en base64 ou
+par URL à l'API correspondante.
+
 ## ✨ Fonctionnalités
 
 - 🎨 **UI premium & dynamique** : thème sombre, glassmorphism, fond animé

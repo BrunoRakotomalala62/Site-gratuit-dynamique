@@ -91,6 +91,15 @@ const UAI_MODELS = new Set([
   "grok", "perplexity", "meta", "qwen",
 ]);
 
+/* Modèles compatibles IMAGE (vision) : les 2 dédiés de l'API historique
+   (gpt-5.6-luna, claude sonnet 4) + les modèles vision de l'API UnlimitedAI.
+   Quand une image est jointe, on utilise le modèle choisi par l'utilisateur
+   s'il fait partie de cette liste (sinon repli sur le sélecteur vision). */
+const VISION_MODELS = new Set([
+  "gpt-5.6-luna", "claude-sonnet-4-20250514",
+  "claude", "chatgpt", "gemini", "grok", "perplexity",
+]);
+
 /* ---------- État ---------- */
 const store = {
   uid: "",
@@ -980,6 +989,28 @@ function currentModel() {
   return $("#modelSelect").value || DEFAULT_MODEL;
 }
 
+/* Sélecteur vision : tous les modèles compatibles image (dédiés historiques
+   + UnlimitedAI), pour le repli quand le modèle texte choisi n'est pas vision. */
+function populateVisionSelect() {
+  const sel = $("#visionSelect");
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = "";
+  const seen = new Set();
+  for (const v of ["gpt-5.6-luna", "claude-sonnet-4-20250514",
+                   "claude", "chatgpt", "gemini", "grok", "perplexity"]) {
+    if (seen.has(v)) continue;
+    seen.add(v);
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = v;
+    sel.appendChild(opt);
+  }
+  if (current && document.querySelector(`#visionSelect option[value="${CSS.escape(current)}"]`)) {
+    sel.value = current;
+  }
+}
+
 /* Modèle de VISION : 2 choix uniquement (gpt-5.6-luna par défaut, claude sonnet 4) */
 const LS_VISION_MODEL = "lumina.chat.visionmodel";
 function visionModel() {
@@ -1436,7 +1467,10 @@ async function callApi(text, attachments, modelOverride) {
   const hasImages = (attachments || []).length > 0;
   // Vision (image jointe) : 2 modèles uniquement (gpt-5.6-luna ou claude sonnet 4),
   // quel que soit le modèle texte sélectionné (les autres hallucinent en vision).
-  const model = hasImages ? visionModel() : (modelOverride || currentModel());
+  let model = modelOverride || currentModel();
+  // Vision : on respecte le modèle choisi par l'utilisateur s'il est
+  // compatible image ; sinon repli sur le sélecteur vision dédié.
+  if (hasImages && !VISION_MODELS.has(model)) model = visionModel();
   // AJOUT : route les modèles « UnlimitedAI » vers la seconde API.
   const useUAI = UAI_MODELS.has(model);
   const ENDPOINT = useUAI ? API_URL_2 : API_URL;
@@ -1785,6 +1819,7 @@ function init() {
 
   loadHistory();
   populateModelSelect();
+  populateVisionSelect();
   updateModelPill();
   loadVisionModel();
 
