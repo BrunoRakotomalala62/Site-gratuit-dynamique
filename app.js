@@ -1178,6 +1178,8 @@ async function rememberFigure(conv, svg, title, desc) {
     title: String(title || ""),
     desc: String(desc || "").slice(0, 300),
   };
+  // affiche la pilule « 📐 Figure en mémoire » dès la construction
+  try { renderAttachmentTray(); } catch (e) { /* environnement limité */ }
 }
 
 async function sendMessage(text, attachments) {
