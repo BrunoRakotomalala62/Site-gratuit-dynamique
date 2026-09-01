@@ -170,6 +170,9 @@ t("géo : concurrence", L.detectGeometryRequest("Les médianes se coupent en G",
 t("géo : tangente au cercle", L.detectGeometryRequest("Tracer la tangente au cercle en A", "") !== null);
 t("géo : photo d'exercice (via réponse)", L.detectGeometryRequest("Fais cet exercice", "1) Tracer la droite (AB). 2) Placer un point P sur (AB).", true) !== null);
 t("pas géo : courbe de fonction", L.detectGeometryRequest("Trace la courbe de f(x)=x\u00b2", "") === null);
+t("pas géo : réponse de courbe avec axe de symétrie", L.detectGeometryRequest("Trace la courbe de f(x)=x²-2x+1 et sa tangente au point d'abscisse 2", "d'axe de symétrie x=1, ouverte vers le haut. La tangente est y=2x-3") === null);
+t("géo : symétrie axiale", L.detectGeometryRequest("Tracer la symétrie axiale par rapport à (AB)", "") !== null);
+t("géo : symétrique de A", L.detectGeometryRequest("Tracer le symétrique de A par rapport à (BC)", "") !== null);
 t("pas géo : droite d'équation y=2x-3", L.detectGeometryRequest("Trace la droite d'équation y = 2x-3", "") === null);
 t("pas géo : question théorique", L.detectGeometryRequest("Explique-moi ce qu'est une droite", "") === null);
 
