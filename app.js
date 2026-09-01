@@ -7,6 +7,12 @@
 /* ---------- Configuration ---------- */
 const API_BASE = "https://chat-free-gpt.vercel.app";
 const API_URL = `${API_BASE}/api/chat`;
+
+/* AJOUT — API supplémentaire : UnlimitedAI Bridge (bon-api-fiable.vercel.app).
+   L'API existante (chat-free-gpt) reste inchangée ; les modèles du groupe
+   « UnlimitedAI (sans inscription) » sont routés vers cette seconde API. */
+const API_BASE_2 = "https://bon-api-fiable.vercel.app";
+const API_URL_2 = `${API_BASE_2}/api/chat`;
 const API_PLOT_URL = `${API_BASE}/api/plot`; // figures : courbes (expression=) & schémas IA (subject=)
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const LANG = "fr";
@@ -61,12 +67,29 @@ const MODELS = {
     ["qwen2.5-72b-instruct", "qwen 2.5 72b"],
     ["mixtral-8x7b-instruct", "mixtral 8x7b"],
   ],
+  "UnlimitedAI (sans inscription)": [
+    ["claude", "claude (unlimitedai)"],
+    ["chatgpt", "chatgpt 5 nano (unlimitedai)"],
+    ["gemini", "gemini (unlimitedai)"],
+    ["deepseek", "deepseek (unlimitedai)"],
+    ["grok", "grok (unlimitedai)"],
+    ["perplexity", "perplexity sonar (unlimitedai)"],
+    ["meta", "llama 4 maverick (unlimitedai)"],
+    ["qwen", "qwen 3 30b (unlimitedai)"],
+  ],
   "Réservés PRO 🔒": [
     ["gpt-5.6-terra", "gpt-5.6-terra (PRO)"],
     ["gpt-4o", "gpt-4o (PRO)"],
   ],
 };
 const PRO_MODELS = new Set(["gpt-5.6-terra", "gpt-4o"]);
+
+/* Modèles servis par l'API UnlimitedAI Bridge (API_URL_2) — tous les autres
+   continuent d'utiliser l'API historique chat-free-gpt. */
+const UAI_MODELS = new Set([
+  "claude", "chatgpt", "gemini", "deepseek",
+  "grok", "perplexity", "meta", "qwen",
+]);
 
 /* ---------- État ---------- */
 const store = {
@@ -1414,6 +1437,9 @@ async function callApi(text, attachments, modelOverride) {
   // Vision (image jointe) : 2 modèles uniquement (gpt-5.6-luna ou claude sonnet 4),
   // quel que soit le modèle texte sélectionné (les autres hallucinent en vision).
   const model = hasImages ? visionModel() : (modelOverride || currentModel());
+  // AJOUT : route les modèles « UnlimitedAI » vers la seconde API.
+  const useUAI = UAI_MODELS.has(model);
+  const ENDPOINT = useUAI ? API_URL_2 : API_URL;
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST);
 
   const controller = new AbortController();
@@ -1430,11 +1456,18 @@ async function callApi(text, attachments, modelOverride) {
     if (!data || typeof data !== "object") {
       throw new Error(`Réponse invalide (HTTP ${res.status})`);
     }
+    // AJOUT : les erreurs de l'API UnlimitedAI (FastAPI) arrivent en {detail: ...}
+    if (data.detail !== undefined && data.error === undefined) {
+      data.error = typeof data.detail === "string" ? data.detail
+        : (data.detail.error || JSON.stringify(data.detail));
+    }
     if (res.status === 402) {
       return { success: false, error: data.error || "Ce modèle est réservé aux membres PRO.", model: data.model };
     }
     if (res.status === 429) {
-      return { success: false, error: "Quota gratuit momentanément épuisé — réessayez dans quelques secondes.", model: data.model };
+      return { success: false, error: useUAI
+        ? "Quota journalier du site atteint (10 msg/IP/jour) — changez de modèle ou réessayez demain."
+        : "Quota gratuit momentanément épuisé — réessayez dans quelques secondes.", model: data.model };
     }
     if (!res.ok || data.success === false) {
       return { success: false, error: data.error || `Erreur HTTP ${res.status}`, model: data.model };
@@ -1447,7 +1480,7 @@ async function callApi(text, attachments, modelOverride) {
       // --- Vision : POST JSON (v4) — aucune limite de longueur d'URL, image nette ---
       let res = null;
       try {
-        res = await fetch(API_URL, {
+        res = await fetch(ENDPOINT, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({
@@ -1480,7 +1513,7 @@ async function callApi(text, attachments, modelOverride) {
       params.set("uid", store.uid);
       params.set("lang", LANG);
       forGet.forEach((a) => params.append("image", a.value));
-      return await handle(await fetch(`${API_URL}?${params.toString()}`, fetchOpts));
+      return await handle(await fetch(`${ENDPOINT}?${params.toString()}`, fetchOpts));
     }
 
     // --- Texte seul : GET (rapide, sans corps) ---
@@ -1489,7 +1522,7 @@ async function callApi(text, attachments, modelOverride) {
     params.set("model", model);
     params.set("uid", store.uid);
     params.set("lang", LANG);
-    return await handle(await fetch(`${API_URL}?${params.toString()}`, fetchOpts));
+    return await handle(await fetch(`${ENDPOINT}?${params.toString()}`, fetchOpts));
   } catch (err) {
     if (err.name === "AbortError") {
       throw new Error("Délai d'attente dépassé (90 s). L'API est peut-être surchargée.");

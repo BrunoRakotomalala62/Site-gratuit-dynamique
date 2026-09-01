@@ -5,6 +5,14 @@ sur Vercel, branché sur l'API gratuite
 [`chat-free-gpt`](https://github.com/BrunoRakotomalala62/chat-free-gpt)
 (`https://chat-free-gpt.vercel.app/api/chat`).
 
+**AJOUT (API secondaire)** : le groupe de modèles *« UnlimitedAI (sans
+inscription) »* (claude, chatgpt, gemini, deepseek, grok, perplexity, meta,
+qwen) est routé vers une seconde API
+[`bon-api-fiable`](https://github.com/BrunoRakotomalala62/bon-api-fiable)
+(`https://bon-api-fiable.vercel.app/api/chat`). L'API historique
+`chat-free-gpt` et toute la logique existante restent inchangées — le choix
+de l'API se fait automatiquement selon le modèle sélectionné.
+
 ## ✨ Fonctionnalités
 
 - 🎨 **UI premium & dynamique** : thème sombre, glassmorphism, fond animé
