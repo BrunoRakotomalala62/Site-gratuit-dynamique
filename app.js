@@ -13,6 +13,13 @@ const API_URL = `${API_BASE}/api/chat`;
    « UnlimitedAI (sans inscription) » sont routés vers cette seconde API. */
 const API_BASE_2 = "https://bon-api-fiable.vercel.app";
 const API_URL_2 = `${API_BASE_2}/api/chat`;
+
+/* AJOUT — API Chatipro (chati.pro) : chat (10 modèles), génération d'image
+   et image-to-image. L'API historique et l'API UnlimitedAI restent intactes. */
+const API_BASE_3 = "https://chatipro.vercel.app";
+const API_URL_3 = `${API_BASE_3}/api/chat`;
+const API_IMAGE_3 = `${API_BASE_3}/api/image`;
+const API_IMAGE_EDIT_3 = `${API_BASE_3}/api/image/edit`;
 const API_PLOT_URL = `${API_BASE}/api/plot`; // figures : courbes (expression=) & schémas IA (subject=)
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const LANG = "fr";
@@ -77,6 +84,18 @@ const MODELS = {
     ["meta", "llama 4 maverick (unlimitedai)"],
     ["qwen", "qwen 3 30b (unlimitedai)"],
   ],
+  "ChatiPro (chati.pro)": [
+    ["gemini-3.1-flash-lite", "gemini 3.5 flash (chatipro)"],
+    ["openai/gpt-5.4-nano", "gpt-5.4 nano (chatipro)"],
+    ["anthropic/claude-3-haiku", "claude 3 haiku (chatipro)"],
+    ["deepseek/deepseek-v4-flash", "deepseek v4 flash (chatipro)"],
+    ["qwen/qwen3.5-flash-02-23", "qwen 3.5 flash (chatipro)"],
+    ["nvidia/nemotron-3-super-120b-a12b", "nemotron 3 super (chatipro)"],
+    ["z-ai/glm-4.7-flash", "glm-4.7 flash (chatipro)"],
+    ["minimax/minimax-m2.7", "minimax m2.7 (chatipro)"],
+    ["mistralai/mistral-small-2603", "mistral small (chatipro)"],
+    ["meta-llama/llama-4-maverick", "llama 4 maverick (chatipro)"],
+  ],
   "Réservés PRO 🔒": [
     ["gpt-5.6-terra", "gpt-5.6-terra (PRO)"],
     ["gpt-4o", "gpt-4o (PRO)"],
@@ -100,6 +119,15 @@ const VISION_MODELS = new Set([
   "claude", "chatgpt", "gemini", "grok", "perplexity",
 ]);
 
+/* Modèles servis par l'API ChatiPro (API_URL_3). */
+const CHATI_MODELS = new Set([
+  "gemini-3.1-flash-lite", "openai/gpt-5.4-nano", "anthropic/claude-3-haiku",
+  "deepseek/deepseek-v4-flash", "qwen/qwen3.5-flash-02-23",
+  "nvidia/nemotron-3-super-120b-a12b", "z-ai/glm-4.7-flash",
+  "minimax/minimax-m2.7", "mistralai/mistral-small-2603",
+  "meta-llama/llama-4-maverick",
+]);
+
 /* ---------- État ---------- */
 const store = {
   uid: "",
@@ -107,6 +135,7 @@ const store = {
   activeId: null,
   sending: false,
   attachments: [],      // {type:'data'|'url', name, value}
+  mode: "chat",         // "chat" | "gen" (🎨 générer) | "edit" (🖼️ modifier)
 };
 
 const LS_HISTORY = "lumina.chat.history.v1";
@@ -1363,6 +1392,11 @@ async function sendMessage(text, attachments) {
   if (store.sending) return;
   if (!text.trim() && (!attachments || !attachments.length)) return;
 
+  // AJOUT : le mode image (🎨 générer / 🖼️ modifier) est capturé AVANT que
+  // les pièces jointes soient vidées (renderAttachmentTray remettrait le
+  // mode à "chat" sinon).
+  const imageMode = store.mode;
+
   // conversation courante
   let conv = getConversation(store.activeId);
   if (!conv) {
@@ -1393,9 +1427,13 @@ async function sendMessage(text, attachments) {
 
   empty.style.display = "none";
 
+  // AJOUT : pour le mode « 🖼️ modifier » (image-to-image), l'image source est
+  // la première pièce jointe de l'utilisateur (dataURL ou URL).
+  const editSrc = (attachments && attachments.length) ? attachments[0].value : null;
+
   const userMsg = {
     role: "user",
-    text: text.trim(),
+    text: (imageMode === "gen" ? "🎨 " : imageMode === "edit" ? "🖼️ " : "") + text.trim(),
     images: (attachments || []).map((a) => a.value), // nouvelles photos seulement (affichage)
     model: toSend.length ? visionModel() : currentModel(), // la vision n'utilise que les 2 modèles dédiés
     time: Date.now(),
@@ -1425,6 +1463,28 @@ async function sendMessage(text, attachments) {
   sendBtn.classList.add("sending");
 
   try {
+    // AJOUT : modes image ChatiPro (🎨 générer / 🖼️ modifier) — flux dédié,
+    // la logique de chat existante n'est pas touchée.
+    if (imageMode === "gen" || imageMode === "edit") {
+      const imgRes = await runImageRequest(text.trim(), editSrc, imageMode);
+      typing.remove();
+      if (imgRes && imgRes.dataUrl) {
+        const reply = {
+          role: "assistant",
+          text: (imageMode === "edit" ? "🖼️ Image modifiée" : "🎨 Image générée"),
+          images: [imgRes.dataUrl],
+          model: "ChatiPro 🎨",
+          time: Date.now(),
+        };
+        conv.messages.push(reply);
+        chatArea.appendChild(renderMessage(reply));
+      } else {
+        throw new Error((imgRes && imgRes.error) || "Génération d'image échouée.");
+      }
+      setComposerMode("chat");
+      return; // le bloc finally fait le ménage (sending, historique, scroll…)
+    }
+
     const data = await callApi(sendText, toSend);
     // retirer l'indicateur
     typing.remove();
@@ -1497,13 +1557,14 @@ async function callApi(text, attachments, modelOverride) {
   if (hasImages && !VISION_MODELS.has(model)) model = visionModel();
   // AJOUT : route les modèles « UnlimitedAI » vers la seconde API.
   const useUAI = UAI_MODELS.has(model);
-  const ENDPOINT = useUAI ? API_URL_2 : API_URL;
+  const useChati = CHATI_MODELS.has(model);
+  const ENDPOINT = useUAI ? API_URL_2 : (useChati ? API_URL_3 : API_URL);
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST);
 
   // AJOUT : consigne LaTeX pour les modèles UnlimitedAI sur question mathématique
   // (fraction à barre horizontale, puissances ^, indices _ — comme le premier backend).
   let promptText = text.trim().slice(0, 4000);
-  if (useUAI && looksMathy(promptText)) promptText += MATH_PROMPT_HINT;
+  if ((useUAI || useChati) && looksMathy(promptText)) promptText += MATH_PROMPT_HINT;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90000);
@@ -1524,6 +1585,8 @@ async function callApi(text, attachments, modelOverride) {
       data.error = typeof data.detail === "string" ? data.detail
         : (data.detail.error || JSON.stringify(data.detail));
     }
+    // AJOUT : l'API ChatiPro ne renvoie pas de champ success — on le déduit
+    if (data.success === undefined && data.reply !== undefined) data.success = true;
     if (res.status === 402) {
       return { success: false, error: data.error || "Ce modèle est réservé aux membres PRO.", model: data.model };
     }
@@ -1591,6 +1654,49 @@ async function callApi(text, attachments, modelOverride) {
       throw new Error("Délai d'attente dépassé (90 s). L'API est peut-être surchargée.");
     }
     throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ---------- Modes image ChatiPro (génération / image-to-image) ----------
+   store.mode = "gen"  → 🎨 génère une image depuis le prompt (API_IMAGE_3)
+   store.mode = "edit" → 🖼️ modifie la pièce jointe (API_IMAGE_EDIT_3) */
+function setComposerMode(mode) {
+  store.mode = mode || "chat";
+  const gen = $("#genBtn");
+  const edit = $("#editImgBtn");
+  if (gen) gen.classList.toggle("active", store.mode === "gen");
+  if (edit) {
+    edit.hidden = store.attachments.length === 0;
+    edit.classList.toggle("active", store.mode === "edit");
+    if (store.mode === "edit" && store.attachments.length === 0) store.mode = "chat";
+  }
+}
+
+async function runImageRequest(prompt, imageSrc, mode) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 150000);
+  try {
+    const isEdit = mode === "edit" && !!imageSrc;
+    const url = isEdit ? API_IMAGE_EDIT_3 : API_IMAGE_3;
+    const body = { prompt: prompt.slice(0, 1000) };
+    if (isEdit) body.image = imageSrc; // dataURL ou URL
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* corps non JSON */ }
+    if (!res.ok || !data || data.error) {
+      return { error: (data && data.error) || `Erreur HTTP ${res.status}` };
+    }
+    return { dataUrl: data.dataUrl || null, data };
+  } catch (err) {
+    if (err.name === "AbortError") return { error: "Délai d'attente dépassé (150 s)." };
+    return { error: err.message || "Erreur réseau." };
   } finally {
     clearTimeout(timer);
   }
@@ -1746,6 +1852,7 @@ function renderAttachmentTray() {
   });
   // pilule « 📷 Exercice en mémoire » (photo renvoyée automatiquement)
   renderImageMemoryPill(getConversation(store.activeId));
+  setComposerMode(store.mode); // maintient l'état des boutons image (edit nécessite une image)
   if (store.attachments.length) {
     const n = el("span", "ac-count", `${store.attachments.length}/${MAX_IMAGES}`);
     n.style.cssText = "margin-left:2px; align-self:center;";
@@ -1929,6 +2036,9 @@ function init() {
       $("#fileInput").click();
     }
   });
+  // AJOUT — modes image ChatiPro (🎨 générer / 🖼️ modifier)
+  $("#genBtn").onclick = () => setComposerMode(store.mode === "gen" ? "chat" : "gen");
+  $("#editImgBtn").onclick = () => setComposerMode(store.mode === "edit" ? "chat" : "edit");
   // URL : bouton dédié qui affiche une barre inline
   $("#urlBtn").onclick = () => {
     const row = $("#urlRow");

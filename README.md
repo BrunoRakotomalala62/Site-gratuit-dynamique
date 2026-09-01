@@ -20,6 +20,18 @@ perplexity) ; sinon il se replie sur le sélecteur « 🖼️ Vision » (lui aus
 rempli avec tous les modèles vision). Les images sont envoyées en base64 ou
 par URL à l'API correspondante.
 
+**AJOUT (API ChatiPro)** : le groupe *« ChatiPro (chati.pro) »* ajoute
+10 modèles (gemini 3.5 flash, gpt-5.4 nano, claude 3 haiku, deepseek v4
+flash, qwen 3.5 flash, nemotron 3, glm-4.7, minimax m2.7, mistral small,
+llama 4 maverick) routés vers `https://chatipro.vercel.app/api/chat`, plus
+deux nouvelles fonctionnalités dans le composer :
+- 🎨 **Génération d'image** (bouton 🎨) : le prompt est envoyé à
+  `https://chatipro.vercel.app/api/image`, l'image générée s'affiche dans le chat ;
+- 🖌️ **Image-to-image** (bouton 🖌️, visible quand une image est jointe) :
+  l'image + le prompt vont à `https://chatipro.vercel.app/api/image/edit`,
+  l'image modifiée s'affiche dans le chat.
+La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
+
 ## ✨ Fonctionnalités
 
 - 🎨 **UI premium & dynamique** : thème sombre, glassmorphism, fond animé

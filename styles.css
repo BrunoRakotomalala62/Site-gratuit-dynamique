@@ -889,3 +889,10 @@ body {
   background: rgba(56, 189, 248, 0.08);
 }
 .attach-chip.memory.figure .ac-name { color: #38bdf8; }
+
+/* AJOUT : boutons modes image ChatiPro (état actif) */
+.composer .icon-btn.active {
+  background: rgba(167, 139, 250, 0.35);
+  box-shadow: 0 0 0 1.5px rgba(167, 139, 250, 0.7), 0 0 12px rgba(167, 139, 250, 0.35);
+  transform: scale(1.08);
+}
