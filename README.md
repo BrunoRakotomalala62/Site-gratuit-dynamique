@@ -97,6 +97,13 @@ sur Vercel, branché sur l'API gratuite
   dessine quand même un SVG (légende honnête « Figure générée par IA
   (approximative) ») — toute demande de figure géométrique aboutit à une
   image.
+- 📐 **Le bot connaît la figure qu'il construit** : la figure (courbe,
+  géométrie, schéma IA) est mémorisée — image PNG + description (étapes,
+  expression, tangente, droite…). Les questions suivantes (« explique-moi
+  cette figure », « pourquoi cette asymptote ? »…) partent AVEC l'image de
+  la figure + une note de contexte → le bot voit la figure et répond
+  précisément. Pilule « 📐 Figure en mémoire ✕ ». Une question sur la
+  figure existante ne reconstruit pas de nouvelle figure.
 - 📷 **Mémoire des photos d'exercice** : la photo jointe est conservée dans
   la conversation et renvoyée automatiquement avec les questions suivantes
   (« dans cette photo, où est la solution ? »…) — le bot ne répond plus
