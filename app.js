@@ -344,7 +344,7 @@ function scrollToBottom(smooth = true) {
    ============================================================ */
 const FIGURE_INTENT_RE = /courbe|courbes|trac(er|é|e)|graphe|graphique|représent(er|ation|ative|e)|schéma|schématis|figure|figures|dessin(er|e)?|diagramme|croquis|parabole|hyperbole|allure|montage|circuit|construis|construire/i;
 const MATH_FN_RE = /(?:ln|log10|log2|log|exp|sqrt|cbrt|abs|sign|floor|ceil|round|sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|min|max)\s*\(/gi;
-const EXPR_STOP_WORDS = /\s+(?:où|avec|sur|dans|pour|quand|et|alors|telle? que)\b/i;
+const EXPR_STOP_WORDS = /\s+(?:où|avec|sur|dans|pour|quand|et|alors|est|soit|telle? que)\b/i;
 
 function hasFigureIntent(text) {
   return FIGURE_INTENT_RE.test(String(text || ""));
@@ -418,15 +418,23 @@ function subjectFromReply(replyText) {
 }
 
 /* Extrait l'abscisse du point de tangence demandé (ex. « tangente au point
-   d'abscisse 2 », « tangente en x = -1 », « tangente au point A(2 ; 4) »).
-   Renvoie un nombre (fraction 1/2 → 0.5) ou null si aucune tangente n'est
-   demandée. La tangente n'est tracée QUE si ce point est donné. */
+   d'abscisse 2 », « tangente en x = -1 », « tangente au point A(2 ; 4) »,
+   « tangente en x = π/2 »).
+   Renvoie un nombre (fraction 1/2 → 0.5, π/2 → π/2) ou null si aucune
+   tangente n'est demandée. La tangente n'est tracée QUE si ce point est donné. */
 function extractTangent(text) {
   if (!text || !/tangente/i.test(String(text))) return null;
   const src = String(text);
-  const num = "([+-]?\\d+\\s*\\/\\s*\\d+|[+-]?\\d+(?:[.,]\\d+)?)";
+  const num = "([+-]?\\d+\\s*\\/\\s*\\d+|[+-]?\\d+(?:[.,]\\d+)?|[+-]?π(?:\\s*\\/\\s*\\d+)?)";
   const toNum = (raw) => {
     const s = raw.replace(/\s+/g, "");
+    if (s.includes("π")) {
+      const parts = s.split("/");
+      const base = parts[0].replace(/π/g, "");
+      const num = base === "" || base === "+" ? Math.PI : base === "-" ? -Math.PI : Number(base) * Math.PI;
+      const den = parts[1] ? Number(parts[1]) : 1;
+      return den && Number.isFinite(num / den) ? num / den : null;
+    }
     if (s.includes("/")) {
       const [a, b] = s.split("/").map(Number);
       if (b && Number.isFinite(a / b)) return a / b;
@@ -444,6 +452,21 @@ function extractTangent(text) {
   return v === null ? null : Number(v.toFixed(6));
 }
 
+/* Extrait une droite d'équation y = ax+b donnée directement par l'exercice
+   (« la droite d'équation y = 2x-3 », « (d) : y = -x + 1 », « la droite y = … »).
+   Renvoie { display, expression } (affine validée) ou null. */
+function extractLine(text) {
+  if (!text || !/droite/i.test(String(text))) return null;
+  const src = String(text);
+  let m = src.match(/droite\s*(?:\([a-z]\)\s*)?(?::\s*|\s+d['’]équation\s+)?y\s*=\s*([^,;.!?…\n]+)/i);
+  if (!m) return null;
+  const raw = m[1].trim().split(EXPR_STOP_WORDS)[0];
+  const send = normalizeExpression(raw);
+  // validation affine : ax+b ou b (pas de x², de sin(x), de produit…)
+  if (!/^[+-]?(?:\d*\.?\d+)?x(?:[+-]\d*\.?\d+)?$|^[+-]?\d*\.?\d+$/.test(send)) return null;
+  return { display: send, expression: send };
+}
+
 /* Détecte si la demande (texte utilisateur + réponse du bot) appelle une figure. */
 function detectFigureRequest(userText, replyText, hasImages) {
   const user = String(userText || "");
@@ -451,11 +474,19 @@ function detectFigureRequest(userText, replyText, hasImages) {
   const intentUser = hasFigureIntent(user);
   const exprUser = extractExpression(user);
   const tangentUser = extractTangent(user);
+  const lineUser = extractLine(user);
 
   // 1) courbe avec expression : « trace la courbe de f(x)=… », « étudie f(x)=… »,
-  //    « trace la courbe et la tangente au point d'abscisse 2 »
-  if (exprUser && (intentUser || /étudi/i.test(user) || tangentUser)) {
+  //    « … et la tangente au point d'abscisse 2 », « … et la droite d'équation y=2x-3 »
+  if (exprUser && (intentUser || /étudi/i.test(user) || tangentUser || lineUser)) {
     const req = { expression: exprUser.send, display: exprUser.display, subject: cleanSubject(user) };
+    if (tangentUser !== null) req.tangent = tangentUser;
+    if (lineUser) req.line = lineUser.expression;
+    return req;
+  }
+  // 1b) droite y=ax+b donnée directement, sans fonction → figure « droite »
+  if (lineUser) {
+    const req = { line: lineUser.expression, display: lineUser.display, subject: cleanSubject(user) };
     if (tangentUser !== null) req.tangent = tangentUser;
     return req;
   }
@@ -469,10 +500,15 @@ function detectFigureRequest(userText, replyText, hasImages) {
     const exprReply = extractExpression(reply);
     const intentReply = hasFigureIntent(reply);
     const tangentReply = extractTangent(reply);
-    if (exprReply && (intentReply || tangentReply)) {
+    const lineReply = extractLine(reply);
+    if (exprReply && (intentReply || tangentReply || lineReply)) {
       const req = { expression: exprReply.send, display: exprReply.display, subject: subjectFromReply(reply) };
       if (tangentReply !== null) req.tangent = tangentReply;
+      if (lineReply) req.line = lineReply.expression;
       return req;
+    }
+    if (lineReply) {
+      return { line: lineReply.expression, display: lineReply.display, subject: subjectFromReply(reply) };
     }
     if (intentReply) {
       const subject = subjectFromReply(reply) || cleanSubject(user);
@@ -484,14 +520,16 @@ function detectFigureRequest(userText, replyText, hasImages) {
 
 /* Appelle /api/plot et renvoie { svg, expression | subject, … }.
    Les asymptotes / branches infinies sont détectées par l'API ; la tangente
-   n'est demandée que si un point de tangence a été fourni. */
+   n'est demandée que si un point de tangence a été fourni ; la droite y=ax+b
+   donnée directement est tracée via le paramètre line. */
 async function fetchFigure(req) {
   const params = new URLSearchParams();
   params.set("format", "json");
   params.set("width", "760");
   params.set("height", "520");
   if (req.expression) params.set("expression", req.expression);
-  else params.set("subject", req.subject);
+  if (req.line) params.set("line", req.line);
+  if (!req.expression && !req.line && req.subject) params.set("subject", req.subject);
   if (req.tangent !== undefined && req.tangent !== null) {
     params.set("tangent", req.tangent);
   }
@@ -1495,7 +1533,7 @@ window.Lumina = {
   openImage,
   // exposés aussi pour les tests / débogage
   detectFigureRequest, normalizeExpression, extractExpression, extractTangent,
-  hasFigureIntent, cleanSubject, figureSvgToDataUri, buildFigureBlock,
+  extractLine, hasFigureIntent, cleanSubject, figureSvgToDataUri, buildFigureBlock,
   fetchFigure,
 };
 

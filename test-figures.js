@@ -84,6 +84,24 @@ t("photo exercice avec tangente (via r\u00e9ponse)", JSON.stringify(d("Fais cet 
 t("tangente seule avec expression d\u00e9clenche la courbe", d("D\u00e9termine la tangente au point d'abscisse 2 de f(x)=x\u00b2-2x+1", "", false) !== null);
 t("sans tangente pas de param\u00e8tre", !JSON.stringify(d("Trace la courbe de f(x)=x\u00b2-2x+1", "", false)).includes("tangent"));
 
+console.log("--- extractTangent (π) ---");
+t("tangente en x = \u03c0/2", Math.abs(L.extractTangent("la tangente en x = \u03c0/2") - Math.PI / 2) < 1e-4);
+t("tangente au point d'abscisse \u03c0", Math.abs(L.extractTangent("la tangente au point d'abscisse \u03c0") - Math.PI) < 1e-4);
+
+console.log("--- extractLine (droite y=ax+b donnée directement) ---");
+t("droite d'équation y = 2x-3", JSON.stringify(L.extractLine("la droite d'équation y = 2x-3")) === JSON.stringify({ display: "2x-3", expression: "2x-3" }));
+t("la droite (d) : y = -x + 1", JSON.stringify(L.extractLine("la droite (d) : y = -x + 1")) === JSON.stringify({ display: "-x+1", expression: "-x+1" }));
+t("la droite y = 0.5x", L.extractLine("Trace la droite y = 0.5x") !== null);
+t("rejette x\u00b2 (pas une droite)", L.extractLine("la droite d'équation y = x\u00b2") === null);
+t("rejette sans mot droite", L.extractLine("Trace la courbe de y = 2x-3") === null);
+t("rejette sin(x)", L.extractLine("la droite d'équation y = sin(x)") === null);
+
+console.log("--- detectFigureRequest avec droite ---");
+t("courbe + droite d'équation", JSON.stringify(d("Trace la courbe de f(x)=x\u00b2-2x+1 et la droite d'équation y=2x-3", "", false)).includes('"line":"2x-3"'));
+t("droite seule (sans fonction)", JSON.stringify(d("Trace la droite d'équation y = -x+1", "", false)).includes('"line":"-x+1"'));
+t("photo exercice avec droite (via réponse)", JSON.stringify(d("Fais cet exercice", "1. f(x)=x\u00b2-2x+1\n2. Montrer que la droite d'équation y=2x-3 est tangente", true)).includes('"line":"2x-3"'));
+t("courbe + droite + tangente", JSON.stringify(d("Trace f(x)=x\u00b2-2x+1, la droite d'équation y=2x-3 et la tangente au point d'abscisse 2", "", false)).includes('"tangent":2') && JSON.stringify(d("Trace f(x)=x\u00b2-2x+1, la droite d'équation y=2x-3 et la tangente au point d'abscisse 2", "", false)).includes('"line":"2x-3"'));
+
 console.log("--- fetchFigure (URL /api/plot) ---");
 (async () => {
   const calls = [];
@@ -95,10 +113,14 @@ console.log("--- fetchFigure (URL /api/plot) ---");
   await fetchFigure({ expression: "x^2-2x+1", tangent: 2 });
   await fetchFigure({ subject: "un circuit" });
   await fetchFigure({ expression: "1/x" });
+  await fetchFigure({ expression: "x^2-2x+1", line: "2x-3" });
+  await fetchFigure({ line: "-x+1" });
   t("tangent transmis à l'URL", calls[0].includes("tangent=2"));
   t("expression transmise", calls[0].includes("expression=x%5E2-2x%2B1"));
   t("subject transmis", decodeURIComponent(calls[1]).replace(/\+/g, " ").includes("subject=un circuit"));
   t("sans tangent → pas de paramètre", !calls[2].includes("tangent"));
+  t("line transmis avec la courbe", calls[3].includes("line=2x-3") && calls[3].includes("expression=x%5E2-2x%2B1"));
+  t("droite seule : line sans expression", calls[4].includes("line=-x%2B1") && !calls[4].includes("expression="));
   delete global.fetch;
 
   console.log("");
