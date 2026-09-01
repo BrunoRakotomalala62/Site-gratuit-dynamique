@@ -80,9 +80,18 @@ sur Vercel, branché sur l'API gratuite
   questions, chaque étape dans une couleur + légende des étapes
   (« 1) droite (AB) 2) point P sur (AB) 3) (d) ⊥ (AB) en P »). Gère droites,
   segments, demi-droites, points sur droite/segment/cercle, perpendiculaires
-  (marque ∟), parallèles, cercles, milieux, médiatrices, médianes, hauteurs,
-  bissectrices, intersections, triangles (rectangle en A ∟), carrés,
-  rectangles, losanges, parallélogrammes.
+  (marque ∟), parallèles, cercles (dont de diamètre, circonscrit, inscrit),
+  tangente au cercle, milieux, médiatrices, médianes, hauteurs, bissectrices,
+  intersections, concurrence (G, H, O, I), triangles (équilatéral, isocèle,
+  rectangle en A ∟), carrés, rectangles, losanges, parallélogrammes,
+  trapèzes, pentagones, hexagones, symétries centrale/axiale, translation,
+  rotation, homothétie, longueurs (« AB = 5 cm »), angles mesurés
+  (« ABC = 45° »).
+- 🧠 **Repli IA pour toutes les constructions** : si le moteur exact ne
+  reconnaît pas la construction (« Construis un angle de 30° »…), l'IA
+  dessine quand même un SVG (légende honnête « Figure générée par IA
+  (approximative) ») — toute demande de figure géométrique aboutit à une
+  image.
 - 🌍 100 % côté client, zéro build, pas de clé API.
 
 ## 🚀 Déploiement

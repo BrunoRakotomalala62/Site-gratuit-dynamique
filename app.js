@@ -427,7 +427,11 @@ function subjectFromReply(replyText) {
    (coordonnées exactes, aucune hallucination) et renvoie UNE figure
    cumulative qui les montre toutes.
    ============================================================ */
-const GEO_INTENT_RE = /passant\s+par\s+[A-Z]\s+et\s+[A-Z]|perpendiculaire|parall[eè]le|m[eé]diatrice|m[eé]diane\s+issue|hauteur\s+issue|bissectrice|cercle\s+de\s+centre|triangle\s+[A-Z]{3}|carr[eé]\s+[A-Z]{4}|rectangle\s+[A-Z]{4}|losange|parall[eé]logramme|quadrilat[eè]re\s+[A-Z]{4}|segment\s*\[[A-Z]{2}\]|demi[- ]droite|milieu\s+de\s+\[?[A-Z]{2}\]?|se\s+coupent\s+en|\([A-Z]{2}\)\s*(?:et\s+\([A-Z]{2}\)|passant)?|placer\s+(?:(?:le|un)\s+)?point\s+[A-Z]\s+sur|soi(?:t|ent)\s+[A-Z].{0,40}points?|appartient\s+[àa]\s+(?:la\s+droite|le\s+segment)/i;
+/* Détecte un énoncé de géométrie (texte utilisateur ou réponse du bot) :
+   toutes les constructions (droites, cercles, angles, transformations,
+   polygones, concurrence…) → le moteur /api/geo construit la figure exacte,
+   ou l'IA en repli si la construction n'est pas reconnue. */
+const GEO_INTENT_RE = /construi(?:re|s)\s+(?:un|le|l')?\s*angle|angle\s+[A-Z]{3}|angle\s+(?:de|d')|sym[eé]trique|sym[eé]trie|translation|rotation|homoth[eé]tie|image\s+de\s+[A-Z]\s+par|tangente\s+au\s+cercle|trap[eè]ze|pentagone|hexagone|droite\s+des\s+milieux|[A-Z]{2}\s*=\s*\d+\s*cm|passant\s+par\s+[A-Z]\s+et\s+[A-Z]|perpendiculaire|parall[eè]le|m[eé]diatrice|m[eé]diane\s+issue|hauteur\s+issue|bissectrice|cercle\s+de\s+(?:centre|diam|rayon)|cercle\s+(?:circonscrit|inscrit)|triangle\s+[A-Z]{3}|triangle\s+(?:[eé]quilat[eé]ral|isoc[eè]le|rectangle)|carr[eé]\s+[A-Z]{4}|rectangle\s+[A-Z]{4}|losange|parall[eé]logramme|quadrilat[eè]re\s+[A-Z]{4}|segment\s*\[[A-Z]{2}\]|demi[- ]droite|milieu\s+de\s+\[?[A-Z]{2}\]?|se\s+coupent\s+en|\([A-Z]{2}\)\s*(?:et\s+\([A-Z]{2}\)|passant)?|placer\s+(?:(?:le|un)\s+)?point\s+[A-Z]\s+sur|soi(?:t|ent)\s+[A-Z].{0,40}points?|appartient\s+[àa]\s+(?:la\s+droite|le\s+segment)/i;
 
 /* Détecte un énoncé de géométrie (texte utilisateur ou réponse du bot) et
    renvoie le texte à envoyer au moteur /api/geo (ou null). */
@@ -439,14 +443,17 @@ function detectGeometryRequest(userText, replyText) {
   return null;
 }
 
-/* Appelle /api/geo et renvoie le SVG de la figure géométrique construite. */
+/* Appelle /api/geo et renvoie { svg, mode } où mode vaut :
+   - "exact" : figure construite par le moteur déterministe (calculée, vraie) ;
+   - "ia"    : repli IA — le moteur n'a pas reconnu la construction, le modèle
+     a dessiné un SVG approximatif. */
 async function fetchGeoFigure(text) {
   const params = new URLSearchParams();
   params.set("text", String(text || "").slice(0, 3000));
   params.set("width", "760");
   params.set("height", "540");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), 75000);
   try {
     const res = await fetch(`${API_BASE}/api/geo?${params.toString()}`, {
       signal: controller.signal,
@@ -456,7 +463,7 @@ async function fetchGeoFigure(text) {
     if (!data || !data.success || !data.svg) {
       throw new Error((data && data.error) || `Erreur HTTP ${res.status}`);
     }
-    return data.svg;
+    return { svg: data.svg, mode: data.mode === "ia" ? "ia" : "exact" };
   } finally {
     clearTimeout(timer);
   }
@@ -661,13 +668,21 @@ async function downloadFigurePng(svg, baseName) {
   }
 }
 
-/* Bloc figure : légende (petit titre) + image + bouton PNG. */
-function buildFigureBlock(svg, title) {
+/* Bloc figure : légende (petit titre) + image + bouton PNG.
+   opts.mode === "ia" → figure générée par IA (approximative), signalée
+   honnêtement ; sinon figure construite exactement (moteur déterministe). */
+function buildFigureBlock(svg, title, opts) {
   const wrap = document.createElement("figure");
-  wrap.className = "figure-block";
+  wrap.className = "figure-block" + (opts && opts.mode === "ia" ? " figure-ia" : "");
   const cap = document.createElement("figcaption");
-  cap.appendChild(el("span", "fig-emoji", "📐"));
-  cap.appendChild(el("span", "fig-label", "Figure construite"));
+  if (opts && opts.mode === "ia") {
+    cap.appendChild(el("span", "fig-emoji", "🧠"));
+    cap.appendChild(el("span", "fig-label", "Figure générée par IA"));
+    cap.appendChild(el("span", "fig-note", " (approximative — vérifiez avec l'énoncé)"));
+  } else {
+    cap.appendChild(el("span", "fig-emoji", "📐"));
+    cap.appendChild(el("span", "fig-label", "Figure construite"));
+  }
   if (title) cap.appendChild(el("span", "fig-title", "— " + escapeHtml(title)));
   wrap.appendChild(cap);
 
@@ -687,28 +702,36 @@ function buildFigureBlock(svg, title) {
 
 /* Construction asynchrone de la figure, à la fin de la réponse du bot. */
 async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, hasImages) {
-  // 0) Géométrie (moteur déterministe /api/geo) : énoncé avec constructions
-  //    successives (droites, perpendiculaires, cercles…) → UNE figure cumulative
+  // 0) Géométrie (/api/geo) : énoncé avec constructions successives
+  //    (droites, perpendiculaires, cercles, transformations…) → UNE figure
+  //    cumulative. Moteur déterministe exact d'abord, repli IA sinon.
   const geoText = detectGeometryRequest(userText, replyText);
   if (geoText) {
     const bubble = replyEl.querySelector(".msg-bubble");
     if (bubble) {
       const placeholder = el("div", "figure-block loading",
-        "<span class='fig-emoji'>✏️</span> Construction géométrique…");
+        "<span class='fig-emoji'>✏️</span> Construction de la figure…");
       bubble.appendChild(placeholder);
       scrollToBottom();
       try {
-        const svg = await fetchGeoFigure(geoText);
-        replyMsg.figure = { svg, title: "construction géométrique" };
+        const res = await fetchGeoFigure(geoText);
+        const title = res.mode === "ia"
+          ? "construction géométrique (IA)"
+          : "construction géométrique";
+        replyMsg.figure = { svg: res.svg, title };
         touchConversation(conv.id);
         saveHistory();
         if (placeholder.isConnected) {
-          placeholder.replaceWith(buildFigureBlock(svg, "construction géométrique"));
+          placeholder.replaceWith(
+            res.mode === "ia"
+              ? buildFigureBlock(res.svg, title, { mode: "ia" })
+              : buildFigureBlock(res.svg, title)
+          );
           scrollToBottom();
         }
         return; // géométrie traitée
       } catch (err) {
-        // énoncé non reconnu par le moteur → repli sur la détection classique
+        // énoncé non reconnu par le moteur ni par l'IA → repli sur la détection classique
         if (placeholder.isConnected) placeholder.remove();
       }
     }

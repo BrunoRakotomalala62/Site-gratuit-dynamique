@@ -157,6 +157,17 @@ t("géo : perpendiculaire", L.detectGeometryRequest("Tracer la droite passant pa
 t("géo : (AB) parenthèses", L.detectGeometryRequest("Tracer (AB)", "") !== null);
 t("géo : cercle de centre", L.detectGeometryRequest("Cercle de centre O de rayon 3 cm", "") !== null);
 t("géo : triangle ABC", L.detectGeometryRequest("Tracer le triangle ABC", "") !== null);
+t("géo : angle de 30°", L.detectGeometryRequest("Construire un angle de 30° avec le rapporteur", "") !== null);
+t("géo : angle ABC = 45°", L.detectGeometryRequest("L'angle ABC = 45°", "") !== null);
+t("géo : symétrie", L.detectGeometryRequest("Tracer le symétrique de A par rapport à la droite (BC)", "") !== null);
+t("géo : translation", L.detectGeometryRequest("Tracer l'image de C par la translation qui transforme A en B", "") !== null);
+t("géo : rotation", L.detectGeometryRequest("Tracer la rotation de centre A et d'angle 90° appliquée au point B", "") !== null);
+t("géo : homothétie", L.detectGeometryRequest("Tracer l'homothétie de centre A et de rapport 2 appliquée au point B", "") !== null);
+t("géo : trapèze", L.detectGeometryRequest("Tracer le trapèze ABCD", "") !== null);
+t("géo : droite des milieux", L.detectGeometryRequest("Tracer la droite des milieux du triangle ABC", "") !== null);
+t("géo : longueur AB = 5 cm", L.detectGeometryRequest("Soit AB = 5 cm", "") !== null);
+t("géo : concurrence", L.detectGeometryRequest("Les médianes se coupent en G", "") !== null);
+t("géo : tangente au cercle", L.detectGeometryRequest("Tracer la tangente au cercle en A", "") !== null);
 t("géo : photo d'exercice (via réponse)", L.detectGeometryRequest("Fais cet exercice", "1) Tracer la droite (AB). 2) Placer un point P sur (AB).", true) !== null);
 t("pas géo : courbe de fonction", L.detectGeometryRequest("Trace la courbe de f(x)=x\u00b2", "") === null);
 t("pas géo : droite d'équation y=2x-3", L.detectGeometryRequest("Trace la droite d'équation y = 2x-3", "") === null);
@@ -171,8 +182,14 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
     return { json: async () => ({ success: true, svg: "<svg></svg>" }) };
   };
   const { fetchGeoFigure } = global.window.Lumina;
-  await fetchGeoFigure("Tracer (AB)");
+  const r1 = await fetchGeoFigure("Tracer (AB)");
   t("URL /api/geo avec text", urls[0].includes("/api/geo?") && decodeURIComponent(urls[0]).replace(/\+/g, " ").includes("text=Tracer (AB)"));
+  t("mode par défaut = exact", r1 && r1.mode === "exact" && r1.svg === "<svg></svg>", JSON.stringify(r1));
+  delete global.fetch;
+
+  global.fetch = async () => ({ json: async () => ({ success: true, svg: "<svg></svg>", mode: "ia" }) });
+  const r2 = await fetchGeoFigure("Construire un angle de 30°");
+  t("mode ia transmis par l'API", r2 && r2.mode === "ia", JSON.stringify(r2));
   delete global.fetch;
 
   // intégration : maybeBuildFigure route un énoncé géométrique vers /api/geo
@@ -187,7 +204,33 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   global.document.querySelector = () => ({ scrollTo: () => {}, style: {} });
   await window.Lumina.maybeBuildFigure("Fais cet exercice", "1) Tracer la droite (AB). 2) Placer un point P sur (AB). 3) Tracer la droite passant par P perpendiculaire à (AB).", conv, replyMsg, replyEl, true);
   t("INTÉGRATION : énoncé géométrique → /api/geo", urls2[0] && urls2[0].includes("/api/geo?"));
-  t("INTÉGRATION : figure géométrique persistée", replyMsg.figure && replyMsg.figure.title === "construction géométrique");
+  t("INTÉGRATION : figure géométrique persistée (exact)", replyMsg.figure && replyMsg.figure.title === "construction géométrique");
+  delete global.fetch;
+
+  // intégration : repli IA → légende honnête + classe figure-ia
+  const urls3 = [];
+  let replacedNode = null;
+  global.fetch = async (url) => {
+    urls3.push(String(url));
+    return { json: async () => ({ success: true, svg: "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\" fill=\"white\"/></svg>", mode: "ia" }) };
+  };
+  const conv3 = { id: "c3" };
+  const replyMsg3 = { role: "assistant", text: "ok" };
+  const created = [];
+  global.document.createElement = (tag) => {
+    const node = { tagName: tag, className: "", innerHTML: "", isConnected: true, children: [], appendChild(c) { this.children.push(c); }, replaceWith(n) { replacedNode = n; }, remove() {} };
+    created.push(node);
+    return node;
+  };
+  const replyEl3 = { querySelector: () => ({ appendChild: () => {}, isConnected: true, replaceWith: (node) => { replacedNode = node; }, remove: () => {} }) };
+  global.document.querySelector = () => ({ scrollTo: () => {}, style: {} });
+  await window.Lumina.maybeBuildFigure("Construire un angle de 30° avec le rapporteur", "", conv3, replyMsg3, replyEl3, false);
+  const labelSpan = created.find((n) => n.className === "fig-label");
+  const noteSpan = created.find((n) => n.className === "fig-note");
+  t("INTÉGRATION : repli IA → mode ia persisté", replyMsg3.figure && replyMsg3.figure.title === "construction géométrique (IA)", JSON.stringify(replyMsg3.figure));
+  t("INTÉGRATION : bloc marqué figure-ia", replacedNode && /figure-ia/.test(replacedNode.className), replacedNode && replacedNode.className);
+  t("INTÉGRATION : légende « générée par IA »", labelSpan && labelSpan.innerHTML === "Figure générée par IA", labelSpan && labelSpan.innerHTML);
+  t("INTÉGRATION : note approximative affichée", noteSpan && /approximative/.test(noteSpan.innerHTML), noteSpan && noteSpan.innerHTML);
   delete global.fetch;
 
   console.log("");
