@@ -272,6 +272,22 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   L.clearImageMemory(convPhoto);
   t("clearImageMemory oublie la photo", convPhoto.lastImageRef === undefined, String(convPhoto.lastImageRef));
 
+  console.log("--- mémoire de la figure construite ---");
+  const convFig = { id: "f1", messages: [], lastFigure: { png: "data:image/png;base64,FIG1", title: "courbe", desc: "Courbe de f(x)=x^2, tangente en x=2" } };
+  const rFig = L.resolveSendImages([], convFig, { figure: true });
+  t("figure jointe aux questions suivantes", rFig.length === 1 && rFig[0].value === "data:image/png;base64,FIG1" && rFig[0].name === "figure (mémoire)", JSON.stringify(rFig));
+  t("sans option figure → pas de figure", L.resolveSendImages([], convFig).length === 0);
+  const convFigPhoto = { id: "f2", messages: [{ role: "user", text: "x", images: ["data:image/png;base64,PHOTO"] }], lastImageRef: 0, lastFigure: { png: "data:image/png;base64,FIG2", desc: "d" } };
+  const rBoth = L.resolveSendImages([], convFigPhoto, { figure: true });
+  t("photo + figure combinées", rBoth.length === 2 && rBoth[0].value === "data:image/png;base64,PHOTO" && rBoth[1].value === "data:image/png;base64,FIG2", JSON.stringify(rBoth.map((x) => x.name)));
+  const rNew2 = L.resolveSendImages([{ type: "data", name: "n.png", value: "data:image/png;base64,NEW" }], convFigPhoto, { figure: true });
+  t("nouvelle photo → remplace photo ET figure", rNew2.length === 1 && rNew2[0].value === "data:image/png;base64,NEW", JSON.stringify(rNew2));
+  const convFigSansPng = { id: "f3", messages: [], lastFigure: { png: null, desc: "d" } };
+  t("figure sans png → rien", L.resolveSendImages([], convFigSansPng, { figure: true }).length === 0);
+  t("svgToPngDataUri sans canvas → null (pas de crash)", L.svgToPngDataUri("<svg width='10' height='10'></svg>") instanceof Promise);
+  L.clearFigureMemory(convFig);
+  t("clearFigureMemory oublie la figure", convFig.lastFigure === undefined, String(convFig.lastFigure));
+
   console.log("");
   console.log(pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);

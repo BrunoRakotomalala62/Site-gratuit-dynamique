@@ -881,3 +881,11 @@ body {
   background: rgba(52, 211, 153, 0.08);
 }
 .attach-chip.memory .ac-name { color: #34d399; }
+
+/* Pilule « Figure en mémoire » (figure construite renvoyée avec les
+   questions suivantes) */
+.attach-chip.memory.figure {
+  border: 1px dashed rgba(56, 189, 248, 0.6);
+  background: rgba(56, 189, 248, 0.08);
+}
+.attach-chip.memory.figure .ac-name { color: #38bdf8; }

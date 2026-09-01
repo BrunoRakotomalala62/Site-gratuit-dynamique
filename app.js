@@ -443,7 +443,7 @@ function detectGeometryRequest(userText, replyText) {
   return null;
 }
 
-/* Appelle /api/geo et renvoie { svg, mode, verification } :
+/* Appelle /api/geo et renvoie { svg, mode, verification, steps } :
    - mode "exact" : figure construite par le moteur déterministe (calculée,
      vraie), vérifiée par l'IA (verification.complet) ;
    - mode "ia"    : l'IA a dessiné la figure — soit en repli (construction
@@ -471,6 +471,7 @@ async function fetchGeoFigure(text) {
       verification: data.verification && typeof data.verification.complet === "boolean"
         ? data.verification
         : null,
+      steps: Array.isArray(data.steps) ? data.steps : [],
     };
   } finally {
     clearTimeout(timer);
@@ -648,8 +649,9 @@ function ensureSvgSize(svg, width, height) {
   return s.replace(/<svg\b/, `<svg width="${width}" height="${height}"`);
 }
 
-/* Télécharge la figure en PNG (rasterisation via canvas). */
-async function downloadFigurePng(svg, baseName) {
+/* Rasterise un SVG en PNG (data-URI) via canvas — fond blanc.
+   Renvoie null si le canvas est indisponible (environnement limité). */
+async function svgToPngDataUri(svg) {
   try {
     const size = svgSize(svg);
     const img = new Image();
@@ -659,14 +661,26 @@ async function downloadFigurePng(svg, baseName) {
       img.onerror = () => rej(new Error("SVG illisible"));
     });
     const canvas = document.createElement("canvas");
+    if (!canvas.getContext) return null;
     canvas.width = size.width;
     canvas.height = size.height;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, size.width, size.height);
     ctx.drawImage(img, 0, 0, size.width, size.height);
+    return canvas.toDataURL("image/png");
+  } catch (err) {
+    return null;
+  }
+}
+
+/* Télécharge la figure en PNG (rasterisation via canvas). */
+async function downloadFigurePng(svg, baseName) {
+  try {
+    const png = await svgToPngDataUri(svg);
+    if (!png) throw new Error("canvas indisponible");
     const a = document.createElement("a");
-    a.href = canvas.toDataURL("image/png");
+    a.href = png;
     a.download = "figure_" + String(baseName || "construite").replace(/[^\w-]+/g, "_").slice(0, 60) + ".png";
     document.body.appendChild(a);
     a.click();
@@ -730,6 +744,11 @@ async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, ha
           ? (complete ? "construction géométrique complétée par l'IA" : "construction géométrique (IA)")
           : "construction géométrique";
         replyMsg.figure = { svg: res.svg, title };
+        // mémoire de la figure : le bot pourra répondre aux questions dessus
+        const desc = res.mode === "exact" && res.steps && res.steps.length
+          ? "Figure de géométrie (constructions calculées) : " + res.steps.map((s) => s.label || s.raw).join(" ; ")
+          : "Figure de géométrie générée par IA pour l'énoncé : " + geoText;
+        rememberFigure(conv, res.svg, title, desc);
         touchConversation(conv.id);
         saveHistory();
         if (placeholder.isConnected) {
@@ -784,6 +803,11 @@ async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, ha
 
     // persistance dans la conversation (re-rendu de l'historique)
     replyMsg.figure = { svg, title };
+    // mémoire de la figure : le bot pourra répondre aux questions dessus
+    const desc = req.expression
+      ? `Figure : courbe de f(x)=${req.expression}` + (req.tangent !== undefined && req.tangent !== null ? `, tangente en x=${req.tangent}` : "") + (req.line ? `, droite y=${req.line}` : "")
+      : `Figure générée par IA pour le sujet : ${req.subject || ""}`;
+    rememberFigure(conv, svg, title, desc);
     touchConversation(conv.id);
     saveHistory();
 
@@ -1060,26 +1084,39 @@ async function handleVisionOrEmpty(data, text, toSend) {
 
 /* ---------- Envoi de message ---------- */
 /* ----------------------------------------------------------------
- * Mémoire des photos d'exercice
+ * Mémoire des photos d'exercice + mémoire de la figure construite
  * ----------------------------------------------------------------
- * Quand l'utilisateur envoie une photo, elle est CONSERVÉE dans la
- * conversation : les questions suivantes (« dans cette photo, où est la
- * solution ? », « et la question 3 ? »…) renvoient automatiquement la
- * photo au bot — sinon il répond « je ne vois pas de photo jointe ».
- * Une nouvelle photo jointe remplace la mémoire ; le bouton ✕ de la
- * pilule l'oublie.
+ * - Photos : quand l'utilisateur envoie une photo, elle est CONSERVÉE
+ *   dans la conversation : les questions suivantes (« dans cette photo,
+ *   où est la solution ? »…) renvoient automatiquement la photo au bot —
+ *   sinon il répond « je ne vois pas de photo jointe ».
+ * - Figure : quand le bot construit une figure (courbe, géométrie, IA),
+ *   son image (PNG) + une description textuelle sont mémorisées : les
+ *   questions suivantes (« explique la figure », « pourquoi cette
+ *   asymptote ? »…) sont envoyées AVEC la figure → le bot la voit.
+ * Une nouvelle photo remplace la mémoire photo ; une nouvelle figure
+ * remplace la figure mémorisée ; les boutons ✕ des pilules les oublient.
  * ---------------------------------------------------------------- */
 
 /* Images à envoyer : les nouvelles jointes, sinon la mémoire de la
-   conversation (dernière photo, jusqu'à MAX_IMAGES_PER_REQUEST). */
-function resolveSendImages(attachments, conv) {
-  if (attachments && attachments.length) return attachments;
-  if (!conv || !conv.messages || typeof conv.lastImageRef !== "number") return [];
-  const msg = conv.messages[conv.lastImageRef];
-  if (!msg || !msg.images || !msg.images.length) return [];
-  return msg.images
-    .slice(0, MAX_IMAGES_PER_REQUEST)
-    .map((v) => ({ type: "data", name: "photo (mémoire)", value: v }));
+   conversation (dernière photo, jusqu'à MAX_IMAGES_PER_REQUEST).
+   Avec opts.figure=true, l'image de la figure construite précédemment est
+   ajoutée (dans la limite de MAX_IMAGES_PER_REQUEST au total). */
+function resolveSendImages(attachments, conv, opts) {
+  const out = [];
+  if (attachments && attachments.length) {
+    out.push(...attachments);
+  } else if (conv && conv.messages && typeof conv.lastImageRef === "number") {
+    const msg = conv.messages[conv.lastImageRef];
+    if (msg && msg.images && msg.images.length) {
+      out.push(...msg.images.slice(0, MAX_IMAGES_PER_REQUEST)
+        .map((v) => ({ type: "data", name: "photo (mémoire)", value: v })));
+    }
+  }
+  if (opts && opts.figure && !(attachments && attachments.length) && conv && conv.lastFigure && conv.lastFigure.png) {
+    out.push({ type: "data", name: "figure (mémoire)", value: conv.lastFigure.png });
+  }
+  return out.slice(0, MAX_IMAGES_PER_REQUEST);
 }
 
 /* Images mémorisées de la conversation (affichage pilule). */
@@ -1092,24 +1129,55 @@ function clearImageMemory(conv) {
   renderAttachmentTray();
 }
 
-/* Pilule « 📷 Exercice en mémoire — ✕ » dans la barre de saisie. */
+function clearFigureMemory(conv) {
+  if (conv) conv.lastFigure = undefined;
+  renderAttachmentTray();
+}
+
+/* Pilules « 📷 Exercice en mémoire » / « 📐 Figure en mémoire » dans la
+   barre de saisie (photo et/ou figure renvoyées automatiquement). */
 function renderImageMemoryPill(conv) {
   const tray = $("#attachmentTray");
   if (!tray || !tray.querySelector || !tray.prepend) return;
-  const old = tray.querySelector(".attach-chip.memory");
-  if (old) old.remove();
+  tray.querySelectorAll(".attach-chip.memory").forEach((n) => n.remove());
   const mem = rememberedImages(conv);
-  if (!mem.length) return;
-  const chip = el("div", "attach-chip memory", "");
-  chip.appendChild(el("img", "", ""));
-  chip.querySelector("img").src = mem[0].value;
-  chip.appendChild(el("span", "ac-name", escapeHtml("Exercice en mémoire")));
-  const rm = el("button", "ac-remove", "✕");
-  rm.setAttribute("aria-label", "Oublier la photo (ne plus la renvoyer)");
-  rm.title = "Oublier la photo";
-  rm.onclick = () => clearImageMemory(conv);
-  chip.appendChild(rm);
-  tray.prepend(chip);
+  if (mem.length) {
+    const chip = el("div", "attach-chip memory photo", "");
+    chip.appendChild(el("img", "", ""));
+    chip.querySelector("img").src = mem[0].value;
+    chip.appendChild(el("span", "ac-name", escapeHtml("Exercice en mémoire")));
+    const rm = el("button", "ac-remove", "✕");
+    rm.setAttribute("aria-label", "Oublier la photo (ne plus la renvoyer)");
+    rm.title = "Oublier la photo";
+    rm.onclick = () => clearImageMemory(conv);
+    chip.appendChild(rm);
+    tray.prepend(chip);
+  }
+  if (conv && conv.lastFigure && conv.lastFigure.png) {
+    const chip = el("div", "attach-chip memory figure", "");
+    chip.appendChild(el("img", "", ""));
+    chip.querySelector("img").src = conv.lastFigure.png;
+    chip.appendChild(el("span", "ac-name", escapeHtml("Figure en mémoire")));
+    const rm = el("button", "ac-remove", "✕");
+    rm.setAttribute("aria-label", "Oublier la figure (ne plus la renvoyer)");
+    rm.title = "Oublier la figure";
+    rm.onclick = () => clearFigureMemory(conv);
+    chip.appendChild(rm);
+    tray.prepend(chip);
+  }
+}
+
+/* Mémorise la figure construite : { png, desc, title }. Le PNG est
+   l'image qui sera renvoyée au bot ; desc est un résumé textuel précis
+   (étapes, asymptotes, tangente…) ajouté au contexte. */
+async function rememberFigure(conv, svg, title, desc) {
+  if (!conv) return;
+  const png = await svgToPngDataUri(svg);
+  conv.lastFigure = {
+    png,
+    title: String(title || ""),
+    desc: String(desc || "").slice(0, 300),
+  };
 }
 
 async function sendMessage(text, attachments) {
@@ -1135,9 +1203,19 @@ async function sendMessage(text, attachments) {
   // Compression au budget POST (qualité haute : ≤ 1024 px, q 0.8).
   // Le repli GET (ancienne API) re-compressera au budget URL si besoin.
   // Sans nouvelle photo, la DERNIÈRE photo de la conversation est
-  // automatiquement renvoyée (mémoire des photos d'exercice).
-  const toSend = resolveSendImages(attachments, conv).map((a) => ({ ...a }));
+  // automatiquement renvoyée (mémoire des photos d'exercice) ; la figure
+  // construite précédemment est jointe aussi (questions sur la figure).
+  const toSend = resolveSendImages(attachments, conv, { figure: true }).map((a) => ({ ...a }));
   await fitAttachmentsToBudget(toSend, BODY_BUDGET, BODY_COMBOS, PER_IMAGE_BODY);
+
+  // Note de contexte ajoutée à la question quand la figure mémorisée est
+  // jointe (le bot sait ce que représente l'image) — le texte affiché
+  // dans la bulle reste celui de l'utilisateur.
+  let sendText = text;
+  const fig = conv.lastFigure;
+  if (fig && fig.png && fig.desc && !(attachments && attachments.length)) {
+    sendText = text.trim() + `\n\n(Contexte — figure construite précédemment, jointe en image : ${fig.desc})`;
+  }
 
   empty.style.display = "none";
 
@@ -1173,13 +1251,13 @@ async function sendMessage(text, attachments) {
   sendBtn.classList.add("sending");
 
   try {
-    const data = await callApi(text, toSend);
+    const data = await callApi(sendText, toSend);
     // retirer l'indicateur
     typing.remove();
 
     if (data.success) {
       // gérer rejet de modération / réponse vide (avec 1 retentative)
-      const finalData = await handleVisionOrEmpty(data, text, toSend);
+      const finalData = await handleVisionOrEmpty(data, sendText, toSend);
       if (!finalData) { /* erreur déjà affichée */ }
       else {
         // compléter automatiquement si le backend a coupé la réponse
@@ -1716,7 +1794,8 @@ window.Lumina = {
   detectFigureRequest, normalizeExpression, extractExpression, extractTangent,
   extractLine, hasFigureIntent, cleanSubject, figureSvgToDataUri, buildFigureBlock,
   fetchFigure, maybeBuildFigure, detectGeometryRequest, fetchGeoFigure,
-  resolveSendImages, rememberedImages, clearImageMemory, renderImageMemoryPill,
+  resolveSendImages, rememberedImages, clearImageMemory, clearFigureMemory,
+  renderImageMemoryPill, svgToPngDataUri, rememberFigure,
 };
 
 // Affichage des erreurs JS (débogage à distance)
