@@ -649,20 +649,22 @@ async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, ha
   scrollToBottom();
 
   let svg = "";
-  let title = req.display || req.subject || "";
+  let title = req.line && !req.expression
+    ? `Droite : y = ${req.line}`
+    : (req.display || req.subject || "");
   try {
     if (req.expression) {
       try {
-        svg = (await fetchFigure({ expression: req.expression, tangent: req.tangent })).svg;
+        svg = (await fetchFigure({ expression: req.expression, tangent: req.tangent, line: req.line })).svg;
       } catch (err) {
         // expression invalide → repli : dessin IA du sujet
         if (req.subject) {
-          svg = (await fetchFigure({ subject: req.subject, tangent: req.tangent })).svg;
+          svg = (await fetchFigure({ subject: req.subject, tangent: req.tangent, line: req.line })).svg;
           title = req.subject;
         } else throw err;
       }
     } else {
-      svg = (await fetchFigure({ subject: req.subject, tangent: req.tangent })).svg;
+      svg = (await fetchFigure({ subject: req.subject, tangent: req.tangent, line: req.line })).svg;
     }
     svg = String(svg || "").trim();
     if (!svg) throw new Error("SVG vide");
@@ -1534,7 +1536,7 @@ window.Lumina = {
   // exposés aussi pour les tests / débogage
   detectFigureRequest, normalizeExpression, extractExpression, extractTangent,
   extractLine, hasFigureIntent, cleanSubject, figureSvgToDataUri, buildFigureBlock,
-  fetchFigure,
+  fetchFigure, maybeBuildFigure,
 };
 
 // Affichage des erreurs JS (débogage à distance)

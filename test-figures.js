@@ -123,6 +123,35 @@ console.log("--- fetchFigure (URL /api/plot) ---");
   t("droite seule : line sans expression", calls[4].includes("line=-x%2B1") && !calls[4].includes("expression="));
   delete global.fetch;
 
+  // --- intégration maybeBuildFigure : la chaîne complète transmet tout ---
+  const { maybeBuildFigure } = global.window.Lumina;
+  const figureUrl = [];
+  global.fetch = async (url) => {
+    figureUrl.push(String(url));
+    return { json: async () => ({ success: true, svg: "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\" fill=\"white\"/></svg>" }) };
+  };
+  const conv = { id: "c1" };
+  const replyMsg = { role: "assistant", text: "ok" };
+  const replyEl = {
+    querySelector: () => ({
+      appendChild: () => {},
+      isConnected: true,
+      replaceWith: (node) => { node.isConnected = false; },
+    }),
+  };
+  const { touchConversation, saveHistory } = (() => {
+    // touchConversation/saveHistory utilisent localStorage + DOM : on les neutralise
+    return { touchConversation: () => {}, saveHistory: () => {} };
+  })();
+  global.document.querySelector = () => ({ scrollTo: () => {}, style: {} });
+  await maybeBuildFigure("Trace la courbe de f(x)=x\u00b2-2x+1 et la droite d'\u00e9quation y=2x-3", "", conv, replyMsg, replyEl, false);
+  t("INTÉGRATION : line transmis via maybeBuildFigure", figureUrl[0].includes("line=2x-3"));
+  t("INTÉGRATION : expression transmise", figureUrl[0].includes("expression=x%5E2-2x%2B1"));
+  t("INTÉGRATION : figure persistée", replyMsg.figure && replyMsg.figure.svg && replyMsg.figure.title === "x^2-2x+1");
+  await maybeBuildFigure("Trace la courbe de f(x)=x\u00b2-2x+1 et la tangente au point d'abscisse 2", "", conv, replyMsg, replyEl, false);
+  t("INTÉGRATION : tangent transmis", figureUrl[1].includes("tangent=2"));
+  delete global.fetch;
+
   console.log("");
   console.log(pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);
