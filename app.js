@@ -143,20 +143,37 @@ function renderInline(text) {
   return s;
 }
 
+const LATEX_ENV_RE = /(?<!\$)\\begin\{(array|matrix|pmatrix|bmatrix|vmatrix|Vmatrix|smallmatrix|cases|dcases|rcases|aligned|alignedat|gathered|split|equation|align|eqnarray)\}[\s\S]*?\\end\{\1\}(?!\$)/g;
+
+/* Enveloppe en mode display \[ … \] les environnements LaTeX sans
+   délimiteurs (\begin{array}…\end{array} seul, sans $ ni \[ … \]). */
+function wrapBareEnvironments(content) {
+  return String(content).replace(LATEX_ENV_RE, (m) => "\\[" + m + "\\]");
+}
+
 function renderMarkdown(src) {
   if (!src) return "";
   const blocks = [];
   let text = src;
 
-  // 1. extraire les blocs de code (protégés : jamais touchés par la suite)
+  // 1. extraire les blocs de code (protégés : jamais touchés par la suite).
+  //    Les blocs ```latex / ```tex / ```math contiennent du LaTeX à RENDRE
+  //    (KaTeX ignore <pre>/<code>), pas du code à afficher.
   text = text.replace(/```([\w-]*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
     const token = `@@BLOCK${blocks.length}@@`;
-    blocks.push({ kind: "code", lang, code });
+    const l = String(lang || "").toLowerCase();
+    if (l === "latex" || l === "tex" || l === "math" || l === "katex") {
+      blocks.push({ kind: "math", content: wrapBareEnvironments(code) });
+    } else {
+      blocks.push({ kind: "code", lang, code });
+    }
     return token;
   });
 
-  // 2. normaliser le LaTeX : le modèle double souvent les backslashes (\\frac → \frac)
-  text = text.replace(/\\(?=\\)/g, "");
+  // 2. normaliser le LaTeX : le modèle double parfois les backslashes des
+  //    commandes (\\frac → \frac), mais PAS les séparateurs de ligne des
+  //    tableaux (\\ suivi d'un espace/saut de ligne = fin de ligne, à garder)
+  text = text.replace(/\\(?=\\(?=[a-zA-Z]))/g, "");
 
   // 3. extraire les maths « display » multi-lignes ($ … $ et \[ … \])
   text = text.replace(/\$\$[\s\S]*?\$\$/g, (m) => {
@@ -167,6 +184,13 @@ function renderMarkdown(src) {
   text = text.replace(/\\\[[\s\S]*?\\\]/g, (m) => {
     const token = `@@BLOCK${blocks.length}@@`;
     blocks.push({ kind: "math", content: m });
+    return token;
+  });
+
+  // 3b. environnements LaTeX SANS délimiteurs dans le texte courant
+  text = text.replace(LATEX_ENV_RE, (m) => {
+    const token = `@@BLOCK${blocks.length}@@`;
+    blocks.push({ kind: "math", content: "\\[" + m + "\\]" });
     return token;
   });
 
@@ -1868,6 +1892,7 @@ window.Lumina = {
   fetchFigure, maybeBuildFigure, detectGeometryRequest, fetchGeoFigure,
   resolveSendImages, rememberedImages, clearImageMemory, clearFigureMemory,
   renderImageMemoryPill, svgToPngDataUri, rememberFigure, detectFigureRemark,
+  renderMarkdown,
 };
 
 // Affichage des erreurs JS (débogage à distance)

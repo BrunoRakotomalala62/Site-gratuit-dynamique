@@ -318,6 +318,18 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   t("pas remarque : question théorique", L.detectFigureRemark("Explique-moi le théorème de Pythagore", convR) === null);
   t("pas remarque : sans figure mémorisée", L.detectFigureRemark("Ajoute la zone de solution", { id: "r2", messages: [] }) === null);
 
+  console.log("--- rendu LaTeX / tableaux (renderMarkdown) ---");
+  const R2 = L.renderMarkdown;
+  const fence = "Voici le tableau :\n```latex\n\\[\n\\begin{array}{c|ccc}\nx & -1 & 0 & 2\\\\ \\hline\n\\end{array}\n\\]\n```";
+  t("fence latex → math-block (pas de pre/code)", R2(fence).includes("math-block") && !R2(fence).includes("<pre><code"), R2(fence).slice(0, 120));
+  const bare2 = "5. Quelques points\n\\begin{array}{c|c} x & f(x)\\\\ \\hline -\\frac12 & -2+\\ln 2 \\end{array}";
+  const outBare = R2(bare2);
+  t("tableau nu → enveloppé en display", outBare.includes("math-block") && outBare.includes("\\[\\begin{array}"), outBare);
+  t("tableau nu : séparateur \\\\ préservé", /f\(x\)\\\\ /.test(outBare), outBare);
+  t("commande doublée \\\\frac → \\frac", R2("\\\\frac{1}{2}").includes("\\frac{1}{2}"));
+  t("code js reste code", R2("```js\nconsole.log(1)\n```").includes("language-js"));
+  t("$$…$$ pas de double enveloppe", !R2("$$\\begin{array}{c} a\\\\ b \\end{array}$$").includes("\\[\\["));
+
   console.log("--- mémoire de la figure construite ---");
   const convFig = { id: "f1", messages: [], lastFigure: { png: "data:image/png;base64,FIG1", title: "courbe", desc: "Courbe de f(x)=x^2, tangente en x=2" } };
   const rFig = L.resolveSendImages([], convFig, { figure: true });
