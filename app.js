@@ -96,6 +96,10 @@ const MODELS = {
     ["mistralai/mistral-small-2603", "mistral small (chatipro)"],
     ["meta-llama/llama-4-maverick", "llama 4 maverick (chatipro)"],
   ],
+  "🖼️ Images (ChatiPro)": [
+    ["__img_gen__", "🎨 générer une image"],
+    ["__img_edit__", "🖌️ modifier une image jointe"],
+  ],
   "Réservés PRO 🔒": [
     ["gpt-5.6-terra", "gpt-5.6-terra (PRO)"],
     ["gpt-4o", "gpt-4o (PRO)"],
@@ -128,6 +132,12 @@ const CHATI_MODELS = new Set([
   "meta-llama/llama-4-maverick",
 ]);
 
+/* Modèles « image » ChatiPro — entrées spéciales du sélecteur : la génération
+   (🎨) et la modification (🖌️) sont deux modèles séparés, visibles dans le menu. */
+const IMG_GEN_MODEL = "__img_gen__";
+const IMG_EDIT_MODEL = "__img_edit__";
+const IMAGE_MODELS = new Set([IMG_GEN_MODEL, IMG_EDIT_MODEL]);
+
 /* ---------- État ---------- */
 const store = {
   uid: "",
@@ -136,6 +146,7 @@ const store = {
   sending: false,
   attachments: [],      // {type:'data'|'url', name, value}
   mode: "chat",         // "chat" | "gen" (🎨 générer) | "edit" (🖼️ modifier)
+  lastChatModel: null,  // dernier modèle de chat (restauré après une image)
 };
 
 const LS_HISTORY = "lumina.chat.history.v1";
@@ -1392,10 +1403,13 @@ async function sendMessage(text, attachments) {
   if (store.sending) return;
   if (!text.trim() && (!attachments || !attachments.length)) return;
 
-  // AJOUT : le mode image (🎨 générer / 🖼️ modifier) est capturé AVANT que
-  // les pièces jointes soient vidées (renderAttachmentTray remettrait le
-  // mode à "chat" sinon).
-  const imageMode = store.mode;
+  // AJOUT : le mode image (🎨 générer / 🖼️ modifier) vient soit du modèle
+  // choisi dans le sélecteur (« 🖼️ Images (ChatiPro) »), soit des boutons
+  // 🎨/🖌️ ; il est capturé AVANT que les pièces jointes soient vidées.
+  const selModel = currentModel();
+  let imageMode = store.mode;
+  if (selModel === IMG_GEN_MODEL) imageMode = "gen";
+  else if (selModel === IMG_EDIT_MODEL) imageMode = "edit";
 
   // conversation courante
   let conv = getConversation(store.activeId);
@@ -1435,13 +1449,15 @@ async function sendMessage(text, attachments) {
     role: "user",
     text: (imageMode === "gen" ? "🎨 " : imageMode === "edit" ? "🖼️ " : "") + text.trim(),
     images: (attachments || []).map((a) => a.value), // nouvelles photos seulement (affichage)
-    model: toSend.length ? visionModel() : currentModel(), // la vision n'utilise que les 2 modèles dédiés
+    model: imageMode === "gen" ? "🎨 ChatiPro"
+      : imageMode === "edit" ? "🖌️ ChatiPro"
+      : (toSend.length ? visionModel() : currentModel()), // la vision n'utilise que les 2 modèles dédiés
     time: Date.now(),
   };
   conv.messages.push(userMsg);
   if (userMsg.images.length) conv.lastImageRef = conv.messages.length - 1;
   if (!conv.title) conv.title = text.trim().slice(0, 46) || "Conversation";
-  conv.model = currentModel();
+  conv.model = imageMode !== "chat" ? (store.lastChatModel || DEFAULT_MODEL) : currentModel();
   touchConversation(conv.id);
   saveHistory();
   renderHistory();
@@ -1466,6 +1482,9 @@ async function sendMessage(text, attachments) {
     // AJOUT : modes image ChatiPro (🎨 générer / 🖼️ modifier) — flux dédié,
     // la logique de chat existante n'est pas touchée.
     if (imageMode === "gen" || imageMode === "edit") {
+      if (imageMode === "edit" && !editSrc) {
+        throw new Error("Joignez d'abord une image (📎 ou 🔗) à modifier.");
+      }
       const imgRes = await runImageRequest(text.trim(), editSrc, imageMode);
       typing.remove();
       if (imgRes && imgRes.dataUrl) {
@@ -1482,6 +1501,7 @@ async function sendMessage(text, attachments) {
         throw new Error((imgRes && imgRes.error) || "Génération d'image échouée.");
       }
       setComposerMode("chat");
+      restoreModelAfterImage();
       return; // le bloc finally fait le ménage (sending, historique, scroll…)
     }
 
@@ -1526,9 +1546,15 @@ async function sendMessage(text, attachments) {
     }
   } catch (err) {
     typing.remove();
+    const errMsgRaw = String(err.message || "");
+    const errText = /joignez d'abord/i.test(errMsgRaw)
+      ? errMsgRaw
+      : (CHATI_MODELS.has(currentModel()) && /networkerror|failed to fetch|load failed|CORS/i.test(errMsgRaw)
+        ? "L'API ChatiPro semble bloquée (CORS) — vérifiez que chatipro.vercel.app a bien été redéployé avec le correctif CORS (git push + vercel --prod)."
+        : "Impossible de joindre l'API. Vérifiez votre connexion puis réessayez.");
     const errMsg = {
       role: "assistant",
-      text: "❌ Impossible de joindre l'API. Vérifiez votre connexion puis réessayez.\n\n`" + escapeHtml(String(err.message || err)) + "`",
+      text: "❌ " + errText + "\n\n`" + escapeHtml(String(err.message || err)) + "`",
       error: true,
       model: currentModel(),
       time: Date.now(),
@@ -1674,6 +1700,18 @@ function setComposerMode(mode) {
   }
 }
 
+/* Après une génération/modification d'image, le sélecteur revient au
+   dernier modèle de chat (le modèle « image » n'est pas mémorisé). */
+function restoreModelAfterImage() {
+  const sel = $("#modelSelect");
+  const prev = store.lastChatModel || DEFAULT_MODEL;
+  if (IMAGE_MODELS.has(sel.value) && sel.querySelector(`option[value="${CSS.escape(prev)}"]`)) {
+    sel.value = prev;
+    sel.dataset.prevModel = prev;
+    updateModelPill();
+  }
+}
+
 async function runImageRequest(prompt, imageSrc, mode) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 150000);
@@ -1696,6 +1734,9 @@ async function runImageRequest(prompt, imageSrc, mode) {
     return { dataUrl: data.dataUrl || null, data };
   } catch (err) {
     if (err.name === "AbortError") return { error: "Délai d'attente dépassé (150 s)." };
+    if (err instanceof TypeError || /networkerror|failed to fetch|load failed/i.test(String(err.message || ""))) {
+      return { error: "Impossible de joindre l'API ChatiPro (CORS). Vérifiez que chatipro.vercel.app a bien été redéployé avec le correctif CORS (git push + vercel --prod)." };
+    }
     return { error: err.message || "Erreur réseau." };
   } finally {
     clearTimeout(timer);
@@ -2011,13 +2052,18 @@ function init() {
 
   // modèle
   $("#modelSelect").addEventListener("change", () => {
+    const prev = $("#modelSelect").dataset.prevModel || DEFAULT_MODEL;
     const m = currentModel();
+    $("#modelSelect").dataset.prevModel = m;
     updateModelPill();
     const conv = getConversation(store.activeId);
     if (conv) { conv.model = m; saveHistory(); renderHistory(); }
     if (PRO_MODELS.has(m)) {
       toast("Modèle réservé aux membres PRO — l'API renverra une erreur 402.", "error");
     }
+    // AJOUT : mémorise le dernier modèle de CHAT (pour restaurer le sélecteur
+    // après une génération/modification d'image).
+    store.lastChatModel = IMAGE_MODELS.has(m) ? prev : m;
   });
 
   // modèle de vision (2 choix uniquement)
