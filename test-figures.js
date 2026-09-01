@@ -97,7 +97,7 @@ console.log("--- fetchFigure (URL /api/plot) ---");
   await fetchFigure({ expression: "1/x" });
   t("tangent transmis à l'URL", calls[0].includes("tangent=2"));
   t("expression transmise", calls[0].includes("expression=x%5E2-2x%2B1"));
-  t("subject transmis", decodeURIComponent(calls[1]).includes("subject=un circuit"));
+  t("subject transmis", decodeURIComponent(calls[1]).replace(/\+/g, " ").includes("subject=un circuit"));
   t("sans tangent → pas de paramètre", !calls[2].includes("tangent"));
   delete global.fetch;
 
