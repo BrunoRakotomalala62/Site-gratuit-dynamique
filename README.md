@@ -39,6 +39,22 @@ sur Vercel, branché sur l'API gratuite
   suppression, titre auto, date et modèle.
 - 🧾 **Rendu Markdown** dans les réponses : gras, listes, liens, citations,
   blocs de code avec bouton « Copier ».
+- 📈 **Figures construites (courbes & schémas)** : quand la demande contient
+  une consigne de dessin (« trace la courbe de f(x)=… », « fais le schéma d'un
+  circuit électrique », ou une **photo d'exercice** avec ce type de question),
+  Lumina appelle `/api/plot` de l'API et affiche **l'image de la figure
+  construite à la fin de la réponse du bot**, avec une petite légende
+  « 📐 Figure construite ». Deux modes :
+  - **courbe mathématique** (déterministe, instantané) : détection de
+    l'expression `f(x)=…`/`y=…` (gère `x²`, `x³`, `√x`, `π`, `−`, virgule
+    décimale…), ex. « Trace la courbe de f(x)=x²-2x+1 » ;
+  - **figure par IA** (n'importe quel sujet : physique, chimie, circuits…),
+    ex. « Fais le schéma d'un circuit électrique avec pile et ampoule » ;
+  - **photo d'exercice** : si une image est jointe, la consigne de dessin est
+    repérée dans la réponse du bot (qui reformule l'exercice) et la figure est
+    construite automatiquement.
+  La figure est affichée en image (SVG), avec un bouton **« ⬇️ Télécharger en
+  PNG »**, et elle est conservée dans l'historique (localStorage).
 - 🌍 100 % côté client, zéro build, pas de clé API.
 
 ## 🚀 Déploiement
@@ -79,9 +95,10 @@ Réponse : `{ success, reply, model, uid, images?, conversationId, source }`.
 ## 📁 Structure
 
 ```
-index.html      → interface (hamburger, composer, lightbox…)
-styles.css      → thème premium (glassmorphism, animations, responsive)
-app.js          → logique (API, modèles, historique, pièces jointes, markdown)
+index.html      → interface (hamburger, composer, lightbox…, chip « Trace une courbe »)
+styles.css      → thème premium (glassmorphism, animations, responsive, bloc figure)
+app.js          → logique (API, modèles, historique, pièces jointes, markdown, figures)
+test-figures.js → tests unitaires de la détection des figures (node test-figures.js)
 vercel.json     → configuration Vercel (headers + cleanUrls)
 ```
 
@@ -91,3 +108,6 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
 - ✅ Vision 1 image (URL & data-URI) → réponse + `images[]`
 - ✅ Vision multi-images (2 data-URI) → comparaison + 2 entrées dans `images[]`
 - ✅ Modèles gratuits (~37 noms) vs PRO (`gpt-4o`, `gpt-5.6-terra` → 402)
+- ✅ Figures : `GET /api/plot?expression=x-2ln(x)` (courbe) et
+  `GET /api/plot?subject=circuit+électrique…` (schéma IA) → `{ svg }`
+- ✅ Détection figures : `node test-figures.js` (31 tests)

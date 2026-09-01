@@ -7,6 +7,7 @@
 /* ---------- Configuration ---------- */
 const API_BASE = "https://chat-free-gpt.vercel.app";
 const API_URL = `${API_BASE}/api/chat`;
+const API_PLOT_URL = `${API_BASE}/api/plot`; // figures : courbes (expression=) & schémas IA (subject=)
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const LANG = "fr";
 const MAX_IMAGES = 4;
@@ -302,6 +303,7 @@ function renderMessage(m) {
     renderMath(bubble);
   }
   if (m.images && m.images.length) bubble.insertAdjacentHTML("beforeend", msgImagesGrid(m.images));
+  if (m.figure && m.figure.svg) bubble.appendChild(buildFigureBlock(m.figure.svg, m.figure.title));
 
   const meta = el("div", "msg-meta");
   const time = m.time ? new Date(m.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
@@ -326,6 +328,285 @@ function renderTyping() {
 function scrollToBottom(smooth = true) {
   const area = $("#chatArea");
   area.scrollTo({ top: area.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+}
+
+/* ============================================================
+   Figures construites — courbes mathématiques & schémas SVG
+   ------------------------------------------------------------
+   Quand la demande contient une consigne de dessin (« trace la
+   courbe de f(x)=… », « fais le schéma d'un circuit… », ou une
+   photo d'exercice avec ce type de question), le site appelle la
+   route /api/plot de l'API chat-free-gpt et affiche l'image de la
+   figure construite (SVG) à la fin de la réponse du bot, avec une
+   petite légende. Deux modes, comme l'API :
+     • expression=  → courbe mathématique (déterministe, instantané)
+     • subject=     → n'importe quelle figure par IA (schéma…)
+   ============================================================ */
+const FIGURE_INTENT_RE = /courbe|courbes|trac(er|é|e)|graphe|graphique|représent(er|ation|ative|e)|schéma|schématis|figure|figures|dessin(er|e)?|diagramme|croquis|parabole|hyperbole|allure|montage|circuit|construis|construire/i;
+const MATH_FN_RE = /(?:ln|log10|log2|log|exp|sqrt|cbrt|abs|sign|floor|ceil|round|sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|min|max)\s*\(/gi;
+const EXPR_STOP_WORDS = /\s+(?:où|avec|sur|dans|pour|quand|et|alors|telle? que)\b/i;
+
+function hasFigureIntent(text) {
+  return FIGURE_INTENT_RE.test(String(text || ""));
+}
+
+/* Normalise une expression « scolaire » vers la syntaxe de l'API :
+   f(x)=…, y=…, x²/x³ (exposants Unicode), √x, −, ×, ÷, π, virgule décimale. */
+function normalizeExpression(raw) {
+  let s = String(raw || "").trim();
+  s = s.replace(/^[a-z]\s*\(\s*x\s*\)\s*[:=]\s*/i, ""); // f(x)= / g(x): …
+  s = s.replace(/^y\s*[:=]\s*/i, "");                    // y =
+  s = s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, (m) => "^" + "⁰¹²³⁴⁵⁶⁷⁸⁹".indexOf(m));
+  s = s.replace(/√\s*\(/g, "sqrt(");                    // √(x+1) → sqrt(x+1)
+  s = s.replace(/√\s*([a-zA-Z0-9π]+)/g, "sqrt($1)");    // √x → sqrt(x)
+  s = s.replace(/−/g, "-").replace(/×/g, "*").replace(/÷/g, "/").replace(/π/g, "pi");
+  s = s.replace(/(\d),(\d)/g, "$1.$2");                  // 2,5x → 2.5x
+  s = s.replace(/\*\*/g, "^");
+  return s.replace(/\s+/g, "");
+}
+
+/* Vérifie qu'une chaîne ressemble à une expression en x utilisable
+   (noms de fonctions connues + constantes pi/e + variable x uniquement). */
+function looksLikeExpression(s) {
+  if (!s || !/x/i.test(s) || /[=<>]/.test(s)) return false;
+  let t = s.replace(MATH_FN_RE, "(");
+  t = t.replace(/\b(?:pi|e)\b/g, " ");
+  const ids = t.match(/[a-zA-Z]+/g) || [];
+  return ids.length > 0 && ids.every((id) => id.toLowerCase() === "x");
+}
+
+/* Extrait une expression mathématique d'un texte (mode courbe). */
+function extractExpression(text) {
+  if (!text) return null;
+  const src = String(text);
+  let m = src.match(/(?:[a-z]\s*\(\s*x\s*\)\s*[:=]\s*)([^,;.!?…\n]+)/i);   // f(x)=…
+  if (!m) m = src.match(/(?:^|[^a-z])y\s*[:=]\s*([^,;.!?…\n]+)/i);       // y = …
+  if (!m) m = src.match(/d['’]équation\s+([^,;.!?…\n]+)/i);              // d'équation …
+  if (!m) return null;
+  const raw = m[1].trim().split(EXPR_STOP_WORDS)[0];
+  const send = normalizeExpression(raw);
+  if (!looksLikeExpression(send)) return null;
+  return { send, display: send };
+}
+
+/* Nettoie la question utilisateur pour en faire un sujet de figure IA. */
+function cleanSubject(text) {
+  let s = String(text || "").trim().replace(/[?!.]+$/, "");
+  // 1) ouvertures polies : « peux-tu », « je veux que tu »…
+  s = s.replace(/^(?:peux[- ]?tu|pourrais[- ]?tu|peut[- ]?tu|est[- ]?ce que tu peux|tu peux|je veux(?: que tu)?|j'aimerais(?: que tu)?)\s+/i, "");
+  // 2) impératifs : « fais-moi », « dessine », « trace »…
+  s = s.replace(/^(?:fais[- ]?(?:moi|nous)?|dessine[- ]?(?:moi|nous)?|montre[- ]?(?:moi|nous)?|trace[- ]?(?:moi|nous)?|construis[- ]?(?:moi|nous)?|repr[ée]sente[- ]?(?:moi|nous)?|sch[ée]matise[- ]?(?:moi|nous)?)\s+/i, "");
+  // 3) infinitifs précédés d'un pronom : « me dessiner », « nous montrer »…
+  s = s.replace(/^(?:me|nous|toi|moi)\s*(?:faire|dessiner|montrer|tracer|construire|repr[ée]senter|sch[ée]matiser)\s+/i, "");
+  s = s.replace(/\b(?:s'il te plaît|svp|stp|merci(?: beaucoup)?|please)\b/gi, "");
+  s = s.replace(/\s+(?:suivant|suivante|suivants|suivantes|ci-dessous|ci-dessus|ci-contre)\s*$/i, "");
+  s = s.replace(/\s{2,}/g, " ").trim();
+  return s.slice(0, 300);
+}
+
+/* Extrait de la réponse du bot la phrase contenant la consigne de dessin
+   (cas photo d'exercice : la question est dans l'image, le bot la reformule). */
+function subjectFromReply(replyText) {
+  const t = String(replyText || "");
+  const sentences = t.split(/\n+|(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+  for (const s of sentences) {
+    if (hasFigureIntent(s)) {
+      return cleanSubject(s.replace(/^\s*(?:\d+[.)]\s*|[a-z][.)]\s*|[-*•]\s+)/i, ""));
+    }
+  }
+  return null;
+}
+
+/* Détecte si la demande (texte utilisateur + réponse du bot) appelle une figure. */
+function detectFigureRequest(userText, replyText, hasImages) {
+  const user = String(userText || "");
+  const reply = String(replyText || "");
+  const intentUser = hasFigureIntent(user);
+  const exprUser = extractExpression(user);
+
+  // 1) courbe avec expression : « trace la courbe de f(x)=… », « étudie f(x)=… »
+  if (exprUser && (intentUser || /étudi/i.test(user))) {
+    return { expression: exprUser.send, display: exprUser.display, subject: cleanSubject(user) };
+  }
+  // 2) figure / schéma demandé sans expression → dessin par IA
+  if (intentUser) {
+    const subject = cleanSubject(user);
+    return { subject, display: subject };
+  }
+  // 3) photo d'exercice : la consigne de figure est reformulée par le bot
+  if (hasImages && reply) {
+    const exprReply = extractExpression(reply);
+    const intentReply = hasFigureIntent(reply);
+    if (exprReply && intentReply) {
+      return { expression: exprReply.send, display: exprReply.display, subject: subjectFromReply(reply) };
+    }
+    if (intentReply) {
+      const subject = subjectFromReply(reply) || cleanSubject(user);
+      return { subject, display: subject };
+    }
+  }
+  return null;
+}
+
+/* Appelle /api/plot et renvoie { svg, expression | subject, … }. */
+async function fetchFigure(req) {
+  const params = new URLSearchParams();
+  params.set("format", "json");
+  params.set("width", "760");
+  params.set("height", "520");
+  if (req.expression) params.set("expression", req.expression);
+  else params.set("subject", req.subject);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 75000);
+  try {
+    const res = await fetch(`${API_PLOT_URL}?${params.toString()}`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    const data = await res.json().catch(() => null);
+    if (!data || !data.success || !data.svg) {
+      throw new Error((data && data.error) || `Erreur HTTP ${res.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* SVG → data-URI image (affiché en <img> : aucun script ne peut s'exécuter). */
+function figureSvgToDataUri(svg) {
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+
+/* Dimensions de la figure (width/height ou viewBox). */
+function svgSize(svg) {
+  const s = String(svg || "");
+  let width = 0, height = 0;
+  const w = s.match(/width="(\d+)"/);
+  const h = s.match(/height="(\d+)"/);
+  const vb = s.match(/viewBox="([\d.\s-]+)"/);
+  if (w) width = +w[1];
+  if (h) height = +h[1];
+  if ((!width || !height) && vb) {
+    const p = vb[1].trim().split(/\s+/).map(Number);
+    if (p.length === 4) {
+      width = width || p[2] - p[0];
+      height = height || p[3] - p[1];
+    }
+  }
+  return { width: width || 800, height: height || 600 };
+}
+
+function ensureSvgSize(svg, width, height) {
+  const s = String(svg);
+  if (/width="\d+"/.test(s) && /height="\d+"/.test(s)) return s;
+  return s.replace(/<svg\b/, `<svg width="${width}" height="${height}"`);
+}
+
+/* Télécharge la figure en PNG (rasterisation via canvas). */
+async function downloadFigurePng(svg, baseName) {
+  try {
+    const size = svgSize(svg);
+    const img = new Image();
+    img.src = figureSvgToDataUri(ensureSvgSize(svg, size.width, size.height));
+    await new Promise((res, rej) => {
+      img.onload = res;
+      img.onerror = () => rej(new Error("SVG illisible"));
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, size.width, size.height);
+    ctx.drawImage(img, 0, 0, size.width, size.height);
+    const a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = "figure_" + String(baseName || "construite").replace(/[^\w-]+/g, "_").slice(0, 60) + ".png";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (err) {
+    toast("Téléchargement PNG impossible.", "error");
+  }
+}
+
+/* Bloc figure : légende (petit titre) + image + bouton PNG. */
+function buildFigureBlock(svg, title) {
+  const wrap = document.createElement("figure");
+  wrap.className = "figure-block";
+  const cap = document.createElement("figcaption");
+  cap.appendChild(el("span", "fig-emoji", "📐"));
+  cap.appendChild(el("span", "fig-label", "Figure construite"));
+  if (title) cap.appendChild(el("span", "fig-title", "— " + escapeHtml(title)));
+  wrap.appendChild(cap);
+
+  const img = document.createElement("img");
+  img.className = "figure-img";
+  img.alt = "Figure construite" + (title ? " : " + String(title).replace(/<[^>]*>/g, "") : "");
+  img.loading = "lazy";
+  img.src = figureSvgToDataUri(svg);
+  wrap.appendChild(img);
+
+  const dl = el("button", "figure-download", "⬇️ Télécharger en PNG");
+  dl.type = "button";
+  dl.onclick = () => downloadFigurePng(svg, title);
+  wrap.appendChild(dl);
+  return wrap;
+}
+
+/* Construction asynchrone de la figure, à la fin de la réponse du bot. */
+async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, hasImages) {
+  let req = null;
+  try {
+    req = detectFigureRequest(userText, replyText, hasImages);
+  } catch (e) { return; }
+  if (!req) return;
+
+  const bubble = replyEl.querySelector(".msg-bubble");
+  if (!bubble) return;
+  const placeholder = el("div", "figure-block loading",
+    "<span class='fig-emoji'>✏️</span> Construction de la figure…");
+  bubble.appendChild(placeholder);
+  scrollToBottom();
+
+  let svg = "";
+  let title = req.display || req.subject || "";
+  try {
+    if (req.expression) {
+      try {
+        svg = (await fetchFigure({ expression: req.expression })).svg;
+      } catch (err) {
+        // expression invalide → repli : dessin IA du sujet
+        if (req.subject) {
+          svg = (await fetchFigure({ subject: req.subject })).svg;
+          title = req.subject;
+        } else throw err;
+      }
+    } else {
+      svg = (await fetchFigure({ subject: req.subject })).svg;
+    }
+    svg = String(svg || "").trim();
+    if (!svg) throw new Error("SVG vide");
+
+    // persistance dans la conversation (re-rendu de l'historique)
+    replyMsg.figure = { svg, title };
+    touchConversation(conv.id);
+    saveHistory();
+
+    if (placeholder.isConnected) {
+      placeholder.replaceWith(buildFigureBlock(svg, title));
+      scrollToBottom();
+    }
+  } catch (err) {
+    if (placeholder.isConnected) {
+      placeholder.replaceWith(
+        el("div", "figure-block error",
+          "⚠️ Impossible de construire la figure automatiquement. Réessayez dans quelques secondes.")
+      );
+    }
+  }
 }
 
 /* ---------- Rendu de la conversation courante ---------- */
@@ -665,7 +946,12 @@ async function sendMessage(text, attachments) {
           completed,
         };
         conv.messages.push(reply);
-        chatArea.appendChild(renderMessage(reply));
+        const replyEl = renderMessage(reply);
+        chatArea.appendChild(replyEl);
+        // Figures : si la demande contient une consigne de dessin (courbe,
+        // schéma…) — y compris dans une photo d'exercice — on construit la
+        // figure et on l'affiche à la fin de la réponse du bot.
+        maybeBuildFigure(text, fullText || finalData.reply, conv, reply, replyEl, toSend.length > 0);
       }
     } else {
       const errMsg = {
@@ -1166,7 +1452,12 @@ function init() {
 }
 
 // expose pour le HTML inline (lightbox des images markdown)
-window.Lumina = { openImage };
+window.Lumina = {
+  openImage,
+  // exposés aussi pour les tests / débogage
+  detectFigureRequest, normalizeExpression, extractExpression,
+  hasFigureIntent, cleanSubject, figureSvgToDataUri, buildFigureBlock,
+};
 
 // Affichage des erreurs JS (débogage à distance)
 window.addEventListener("error", (e) => {
