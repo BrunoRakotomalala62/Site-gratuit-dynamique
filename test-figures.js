@@ -104,7 +104,7 @@ t("photo exercice avec droite (via réponse)", JSON.stringify(d("Fais cet exerci
 t("courbe + droite + tangente", JSON.stringify(d("Trace f(x)=x\u00b2-2x+1, la droite d'équation y=2x-3 et la tangente au point d'abscisse 2", "", false)).includes('"tangent":2') && JSON.stringify(d("Trace f(x)=x\u00b2-2x+1, la droite d'équation y=2x-3 et la tangente au point d'abscisse 2", "", false)).includes('"line":"2x-3"'));
 
 console.log("--- fetchFigure (URL /api/plot) ---");
-(async () => {
+const runPlotFetchTests = async () => {
   const calls = [];
   global.fetch = async (url) => {
     calls.push(String(url));
@@ -138,12 +138,9 @@ console.log("--- fetchFigure (URL /api/plot) ---");
       appendChild: () => {},
       isConnected: true,
       replaceWith: (node) => { node.isConnected = false; },
+      remove: () => {},
     }),
   };
-  const { touchConversation, saveHistory } = (() => {
-    // touchConversation/saveHistory utilisent localStorage + DOM : on les neutralise
-    return { touchConversation: () => {}, saveHistory: () => {} };
-  })();
   global.document.querySelector = () => ({ scrollTo: () => {}, style: {} });
   await maybeBuildFigure("Trace la courbe de f(x)=x\u00b2-2x+1 et la droite d'\u00e9quation y=2x-3", "", conv, replyMsg, replyEl, false);
   t("INTÉGRATION : line transmis via maybeBuildFigure", figureUrl[0].includes("line=2x-3"));
@@ -151,6 +148,46 @@ console.log("--- fetchFigure (URL /api/plot) ---");
   t("INTÉGRATION : figure persistée", replyMsg.figure && replyMsg.figure.svg && replyMsg.figure.title === "x^2-2x+1");
   await maybeBuildFigure("Trace la courbe de f(x)=x\u00b2-2x+1 et la tangente au point d'abscisse 2", "", conv, replyMsg, replyEl, false);
   t("INTÉGRATION : tangent transmis", figureUrl[1].includes("tangent=2"));
+  delete global.fetch;
+};
+
+console.log("--- detectGeometryRequest / fetchGeoFigure ---");
+t("géo : droite passant par A et B", L.detectGeometryRequest("Tracer la droite passant par A et B", "") !== null);
+t("géo : perpendiculaire", L.detectGeometryRequest("Tracer la droite passant par P perpendiculaire à (AB)", "") !== null);
+t("géo : (AB) parenthèses", L.detectGeometryRequest("Tracer (AB)", "") !== null);
+t("géo : cercle de centre", L.detectGeometryRequest("Cercle de centre O de rayon 3 cm", "") !== null);
+t("géo : triangle ABC", L.detectGeometryRequest("Tracer le triangle ABC", "") !== null);
+t("géo : photo d'exercice (via réponse)", L.detectGeometryRequest("Fais cet exercice", "1) Tracer la droite (AB). 2) Placer un point P sur (AB).", true) !== null);
+t("pas géo : courbe de fonction", L.detectGeometryRequest("Trace la courbe de f(x)=x\u00b2", "") === null);
+t("pas géo : droite d'équation y=2x-3", L.detectGeometryRequest("Trace la droite d'équation y = 2x-3", "") === null);
+t("pas géo : question théorique", L.detectGeometryRequest("Explique-moi ce qu'est une droite", "") === null);
+
+console.log("--- fetchGeoFigure (URL /api/geo) ---");
+(async () => {
+  await runPlotFetchTests();
+  const urls = [];
+  global.fetch = async (url) => {
+    urls.push(String(url));
+    return { json: async () => ({ success: true, svg: "<svg></svg>" }) };
+  };
+  const { fetchGeoFigure } = global.window.Lumina;
+  await fetchGeoFigure("Tracer (AB)");
+  t("URL /api/geo avec text", urls[0].includes("/api/geo?") && decodeURIComponent(urls[0]).replace(/\+/g, " ").includes("text=Tracer (AB)"));
+  delete global.fetch;
+
+  // intégration : maybeBuildFigure route un énoncé géométrique vers /api/geo
+  const urls2 = [];
+  global.fetch = async (url) => {
+    urls2.push(String(url));
+    return { json: async () => ({ success: true, svg: "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\" fill=\"white\"/></svg>" }) };
+  };
+  const conv = { id: "c2" };
+  const replyMsg = { role: "assistant", text: "ok" };
+  const replyEl = { querySelector: () => ({ appendChild: () => {}, isConnected: true, replaceWith: () => {}, remove: () => {} }) };
+  global.document.querySelector = () => ({ scrollTo: () => {}, style: {} });
+  await window.Lumina.maybeBuildFigure("Fais cet exercice", "1) Tracer la droite (AB). 2) Placer un point P sur (AB). 3) Tracer la droite passant par P perpendiculaire à (AB).", conv, replyMsg, replyEl, true);
+  t("INTÉGRATION : énoncé géométrique → /api/geo", urls2[0] && urls2[0].includes("/api/geo?"));
+  t("INTÉGRATION : figure géométrique persistée", replyMsg.figure && replyMsg.figure.title === "construction géométrique");
   delete global.fetch;
 
   console.log("");

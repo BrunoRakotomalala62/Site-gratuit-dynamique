@@ -417,6 +417,51 @@ function subjectFromReply(replyText) {
   return null;
 }
 
+/* ============================================================
+   Construction géométrique (moteur déterministe /api/geo)
+   ------------------------------------------------------------
+   Quand l'énoncé contient des constructions de géométrie (« Tracer
+   la droite (AB) », « Placer un point P sur (AB) », « perpendiculaire
+   à (AB) passant par P »…) — questions successives d'un exercice —
+   le site appelle /api/geo : le moteur CALCULE chaque construction
+   (coordonnées exactes, aucune hallucination) et renvoie UNE figure
+   cumulative qui les montre toutes.
+   ============================================================ */
+const GEO_INTENT_RE = /passant\s+par\s+[A-Z]\s+et\s+[A-Z]|perpendiculaire|parall[eè]le|m[eé]diatrice|m[eé]diane\s+issue|hauteur\s+issue|bissectrice|cercle\s+de\s+centre|triangle\s+[A-Z]{3}|carr[eé]\s+[A-Z]{4}|rectangle\s+[A-Z]{4}|losange|parall[eé]logramme|quadrilat[eè]re\s+[A-Z]{4}|segment\s*\[[A-Z]{2}\]|demi[- ]droite|milieu\s+de\s+\[?[A-Z]{2}\]?|se\s+coupent\s+en|\([A-Z]{2}\)\s*(?:et\s+\([A-Z]{2}\)|passant)?|placer\s+(?:(?:le|un)\s+)?point\s+[A-Z]\s+sur|soi(?:t|ent)\s+[A-Z].{0,40}points?|appartient\s+[àa]\s+(?:la\s+droite|le\s+segment)/i;
+
+/* Détecte un énoncé de géométrie (texte utilisateur ou réponse du bot) et
+   renvoie le texte à envoyer au moteur /api/geo (ou null). */
+function detectGeometryRequest(userText, replyText) {
+  const user = String(userText || "");
+  const reply = String(replyText || "");
+  if (GEO_INTENT_RE.test(user)) return user;
+  if (reply && GEO_INTENT_RE.test(reply)) return reply;
+  return null;
+}
+
+/* Appelle /api/geo et renvoie le SVG de la figure géométrique construite. */
+async function fetchGeoFigure(text) {
+  const params = new URLSearchParams();
+  params.set("text", String(text || "").slice(0, 3000));
+  params.set("width", "760");
+  params.set("height", "540");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch(`${API_BASE}/api/geo?${params.toString()}`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    const data = await res.json().catch(() => null);
+    if (!data || !data.success || !data.svg) {
+      throw new Error((data && data.error) || `Erreur HTTP ${res.status}`);
+    }
+    return data.svg;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* Extrait l'abscisse du point de tangence demandé (ex. « tangente au point
    d'abscisse 2 », « tangente en x = -1 », « tangente au point A(2 ; 4) »,
    « tangente en x = π/2 »).
@@ -642,6 +687,33 @@ function buildFigureBlock(svg, title) {
 
 /* Construction asynchrone de la figure, à la fin de la réponse du bot. */
 async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, hasImages) {
+  // 0) Géométrie (moteur déterministe /api/geo) : énoncé avec constructions
+  //    successives (droites, perpendiculaires, cercles…) → UNE figure cumulative
+  const geoText = detectGeometryRequest(userText, replyText);
+  if (geoText) {
+    const bubble = replyEl.querySelector(".msg-bubble");
+    if (bubble) {
+      const placeholder = el("div", "figure-block loading",
+        "<span class='fig-emoji'>✏️</span> Construction géométrique…");
+      bubble.appendChild(placeholder);
+      scrollToBottom();
+      try {
+        const svg = await fetchGeoFigure(geoText);
+        replyMsg.figure = { svg, title: "construction géométrique" };
+        touchConversation(conv.id);
+        saveHistory();
+        if (placeholder.isConnected) {
+          placeholder.replaceWith(buildFigureBlock(svg, "construction géométrique"));
+          scrollToBottom();
+        }
+        return; // géométrie traitée
+      } catch (err) {
+        // énoncé non reconnu par le moteur → repli sur la détection classique
+        if (placeholder.isConnected) placeholder.remove();
+      }
+    }
+  }
+
   let req = null;
   try {
     req = detectFigureRequest(userText, replyText, hasImages);
@@ -1543,7 +1615,7 @@ window.Lumina = {
   // exposés aussi pour les tests / débogage
   detectFigureRequest, normalizeExpression, extractExpression, extractTangent,
   extractLine, hasFigureIntent, cleanSubject, figureSvgToDataUri, buildFigureBlock,
-  fetchFigure, maybeBuildFigure,
+  fetchFigure, maybeBuildFigure, detectGeometryRequest, fetchGeoFigure,
 };
 
 // Affichage des erreurs JS (débogage à distance)

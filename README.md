@@ -70,6 +70,19 @@ sur Vercel, branché sur l'API gratuite
   `ln`, `log`, `sqrt`, `sin`, `cos`, `tan`, `sinh`, `cosh`… avec asymptotes
   et tangentes (chips de démonstration : `e^(-x)`, `sin(x)` + tangente en
   `π/2`).
+- 📐 **Constructions géométriques exactes** (questions successives en une
+  figure) : quand l'énoncé contient des constructions (« Tracer la droite
+  (AB) », « Placer un point P sur (AB) », « la droite passant par P
+  perpendiculaire à (AB) », « cercle de centre O de rayon 3 cm »…) — tapées
+  ou **repérées dans la réponse du bot** (photo d'exercice) — Lumina appelle
+  `/api/geo` : un **moteur déterministe** (coordonnées calculées, zéro
+  hallucination) construit **une seule figure cumulative** avec toutes les
+  questions, chaque étape dans une couleur + légende des étapes
+  (« 1) droite (AB) 2) point P sur (AB) 3) (d) ⊥ (AB) en P »). Gère droites,
+  segments, demi-droites, points sur droite/segment/cercle, perpendiculaires
+  (marque ∟), parallèles, cercles, milieux, médiatrices, médianes, hauteurs,
+  bissectrices, intersections, triangles (rectangle en A ∟), carrés,
+  rectangles, losanges, parallélogrammes.
 - 🌍 100 % côté client, zéro build, pas de clé API.
 
 ## 🚀 Déploiement
