@@ -99,6 +99,7 @@ t("rejette sin(x)", L.extractLine("la droite d'équation y = sin(x)") === null);
 console.log("--- detectFigureRequest avec droite ---");
 t("courbe + droite d'équation", JSON.stringify(d("Trace la courbe de f(x)=x\u00b2-2x+1 et la droite d'équation y=2x-3", "", false)).includes('"line":"2x-3"'));
 t("droite seule (sans fonction)", JSON.stringify(d("Trace la droite d'équation y = -x+1", "", false)).includes('"line":"-x+1"'));
+t("droite seule : pas d'expression en doublon", !JSON.stringify(d("Trace la droite d'équation y = -x+1", "", false)).includes('"expression"'));
 t("photo exercice avec droite (via réponse)", JSON.stringify(d("Fais cet exercice", "1. f(x)=x\u00b2-2x+1\n2. Montrer que la droite d'équation y=2x-3 est tangente", true)).includes('"line":"2x-3"'));
 t("courbe + droite + tangente", JSON.stringify(d("Trace f(x)=x\u00b2-2x+1, la droite d'équation y=2x-3 et la tangente au point d'abscisse 2", "", false)).includes('"tangent":2') && JSON.stringify(d("Trace f(x)=x\u00b2-2x+1, la droite d'équation y=2x-3 et la tangente au point d'abscisse 2", "", false)).includes('"line":"2x-3"'));
 

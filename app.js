@@ -479,7 +479,14 @@ function detectFigureRequest(userText, replyText, hasImages) {
   // 1) courbe avec expression : « trace la courbe de f(x)=… », « étudie f(x)=… »,
   //    « … et la tangente au point d'abscisse 2 », « … et la droite d'équation y=2x-3 »
   if (exprUser && (intentUser || /étudi/i.test(user) || tangentUser || lineUser)) {
-    const req = { expression: exprUser.send, display: exprUser.display, subject: cleanSubject(user) };
+    // si l'expression extraite EST la droite demandée (ex. « la droite d'équation
+    // y = 2x-3 »), on ne trace que la droite — pas de doublon courbe+droite
+    const lineIsExpression = lineUser && exprUser.send === lineUser.expression;
+    const req = {
+      expression: lineIsExpression ? undefined : exprUser.send,
+      display: exprUser.display,
+      subject: cleanSubject(user),
+    };
     if (tangentUser !== null) req.tangent = tangentUser;
     if (lineUser) req.line = lineUser.expression;
     return req;
