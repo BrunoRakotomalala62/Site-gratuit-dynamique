@@ -444,6 +444,30 @@ function deleteConversation(id) {
   renderHistory();
 }
 
+/* ---------- Suppression de TOUTES les conversations ----------
+   Bouton du menu hamburger. Réutilise uniquement la logique existante
+   (saveHistory / renderConversation / renderHistory / closeSidebar) :
+   aucune fonction existante n'est modifiée. */
+function deleteAllConversations() {
+  const count = store.history.length;
+  if (!count) {
+    toast("Aucune conversation à supprimer.", "error");
+    return;
+  }
+  const ok = window.confirm(
+    `Supprimer ${count} conversation${count > 1 ? "s" : ""} ?\nCette action est irréversible.`
+  );
+  if (!ok) return;
+  store.history = [];
+  store.activeId = null;
+  saveHistory();
+  renderConversation();
+  renderHistory();
+  closeSidebar();
+  toast("Toutes les conversations ont été supprimées.", "success");
+  $("#input").focus();
+}
+
 function newConversation() {
   const conv = {
     id: uid(),
@@ -1044,6 +1068,8 @@ function init() {
 
   // nouvelle conversation
   $("#newConversation").onclick = newConversation;
+  // supprimer toutes les conversations (menu hamburger)
+  $("#deleteAllConversations").onclick = deleteAllConversations;
 
   // envoi
   $("#sendBtn").onclick = () => {

@@ -174,6 +174,20 @@ body {
 .btn-new:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(124, 58, 237, 0.55); filter: brightness(1.08); }
 .btn-new:active { transform: scale(0.97); }
 
+/* Variante « suppression » du bouton (menu hamburger) */
+.btn-delete-all {
+  margin-top: 10px;
+  padding: 11px 12px;
+  font-size: 13.5px;
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.16), rgba(244, 63, 94, 0.09));
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.32);
+  box-shadow: none;
+}
+.btn-delete-all svg { width: 16px; height: 16px; }
+.btn-delete-all:hover { background: rgba(244, 63, 94, 0.22); box-shadow: 0 8px 22px rgba(244, 63, 94, 0.22); filter: brightness(1.05); }
+.btn-delete-all:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+
 .sidebar-section-title {
   margin: 22px 6px 10px;
   font-size: 11px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase;
@@ -212,6 +226,10 @@ body {
 }
 .history-item:hover .h-del { opacity: 1; }
 .history-item .h-del:hover { background: rgba(244, 63, 94, 0.16); color: #fb7185; }
+/* Sur écran tactile (pas de survol), le bouton de suppression reste visible */
+@media (hover: none) {
+  .history-item .h-del { opacity: 0.55; }
+}
 .history-empty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 26px 8px; line-height: 1.6; }
 
 .sidebar-foot {
