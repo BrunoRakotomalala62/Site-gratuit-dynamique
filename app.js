@@ -723,7 +723,66 @@ function buildFigureBlock(svg, title, opts) {
 }
 
 /* Construction asynchrone de la figure, à la fin de la réponse du bot. */
+/* ----------------------------------------------------------------
+ * Remarques de modification de la figure
+ * ----------------------------------------------------------------
+ * Si l'utilisateur veut RETOUCHER la figure construite (« ajoute la zone
+ * de solution », « colorie le triangle ABC », « trace aussi la droite
+ * y=x », « change la couleur »…), l'IA REFERA la figure en tenant compte
+ * de la remarque, et le nouveau dessin REMPLACE l'ancien en place.
+ * ---------------------------------------------------------------- */
+
+/* Détecte une remarque de modification de la figure existante.
+   Renvoie le texte de la remarque, ou null. */
+function detectFigureRemark(userText, conv) {
+  const u = String(userText || "");
+  if (!conv || !conv.lastFigure) return null;
+  // action de modification (sans « trace » seul : nouvelle courbe = nouveau dessin)
+  const action = /ajout|rajout|enl[eè]v|retir|supprim|modifi|chang|compl[eè]t|corrig|refais|refaire|colorie|hachur|ombrag|[ée]paiss|pointill|d[ée]plac|agrandi|r[ée]duit|invers|trace\s+aussi|dessine\s+aussi|mets\s+en/i;
+  // le sujet concerne la figure / son contenu
+  const subject = /figure|graphique|courb|droite|tangent|asymptot|axe|point|triangle|cercle|zone|r[ée]gion|intervalle|solution|hachur|color|parabole|repr[ée]sentation|construction/i;
+  if (!action.test(u) || !subject.test(u)) return null;
+  return u;
+}
+
 async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, hasImages) {
+  // 0) Remarque de modification de la figure existante → l'IA REFERA la
+  //    figure en tenant compte de la remarque (remplacement en place).
+  const remark = detectFigureRemark(userText, conv);
+  if (remark) {
+    const blocks = document.querySelectorAll("#chatArea .figure-block");
+    const oldBlock = blocks[blocks.length - 1];
+    const loading = el("div", "figure-block loading",
+      "<span class='fig-emoji'>✏️</span> Modification de la figure…");
+    if (oldBlock && oldBlock.isConnected) oldBlock.replaceWith(loading);
+    try {
+      const base = (conv.lastFigure && conv.lastFigure.desc) || "figure construite précédemment";
+      const subject = `figure de géométrie : ${String(base).slice(0, 300)} — modification demandée : ${String(remark).slice(0, 180)}`;
+      const data = await fetchFigure({ subject });
+      const svg = String(data && data.svg || "").trim();
+      if (!svg) throw new Error("SVG vide");
+      const title = "figure modifiée par l'IA";
+      // mémoire : la nouvelle figure remplace l'ancienne
+      rememberFigure(conv, svg, title, "Figure modifiée par l'IA selon la remarque : " + String(remark).slice(0, 200));
+      // persistance : remplace la figure du dernier message qui en avait une
+      const lastFigMsg = [...(conv.messages || [])].reverse().find((m) => m.figure && m.figure.svg);
+      if (lastFigMsg) lastFigMsg.figure = { svg, title };
+      touchConversation(conv.id);
+      saveHistory();
+      const newBlock = buildFigureBlock(svg, title, { mode: "ia" });
+      if (loading.isConnected) loading.replaceWith(newBlock);
+      else {
+        const bubble = replyEl.querySelector(".msg-bubble");
+        if (bubble) bubble.appendChild(newBlock);
+      }
+      scrollToBottom();
+      return; // figure modifiée
+    } catch (err) {
+      if (loading.isConnected) loading.remove();
+      // repli : la remarque n'a pas abouti → rien de plus (le bot a répondu en texte)
+    }
+  }
+
   // Question sur la figure EXISTANTE (« explique-moi cette figure »,
   // « pourquoi la tangente… ? ») sans demande de nouveau dessin → on ne
   // reconstruit pas une figure par-dessus l'ancienne (la question partira
@@ -1808,7 +1867,7 @@ window.Lumina = {
   extractLine, hasFigureIntent, cleanSubject, figureSvgToDataUri, buildFigureBlock,
   fetchFigure, maybeBuildFigure, detectGeometryRequest, fetchGeoFigure,
   resolveSendImages, rememberedImages, clearImageMemory, clearFigureMemory,
-  renderImageMemoryPill, svgToPngDataUri, rememberFigure,
+  renderImageMemoryPill, svgToPngDataUri, rememberFigure, detectFigureRemark,
 };
 
 // Affichage des erreurs JS (débogage à distance)

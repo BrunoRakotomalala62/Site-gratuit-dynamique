@@ -270,6 +270,23 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   t("INTÉGRATION : « que représente » → AUCUNE nouvelle figure", urls5.length === 1, String(urls5.length));
   delete global.fetch;
 
+  // intégration : remarque de modification → l'IA refait la figure
+  const urls6 = [];
+  global.fetch = async (url) => {
+    urls6.push(String(url));
+    return { json: async () => ({ success: true, svg: "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\" fill=\"white\"/></svg>" }) };
+  };
+  const conv6 = { id: "c6", messages: [{ role: "assistant", text: "voici", figure: { svg: "<svg></svg>", title: "courbe" } }], lastFigure: { png: "data:image/png;base64,F", desc: "Figure : courbe de f(x)=x^2-2x+1", title: "courbe" } };
+  const replyMsg6 = { role: "assistant", text: "ok" };
+  const replyEl6 = { querySelector: () => ({ appendChild: () => {}, isConnected: true, replaceWith: () => {}, remove: () => {} }) };
+  global.document.querySelector = () => ({ scrollTo: () => {}, style: {} });
+  global.document.querySelectorAll = () => [];
+  await window.Lumina.maybeBuildFigure("Ajoute la zone de solution pour f(x) ≤ 0", "", conv6, replyMsg6, replyEl6, false);
+  t("INTÉGRATION : remarque → /api/plot subject=modification", urls6[0] && urls6[0].includes("/api/plot?") && decodeURIComponent(urls6[0]).replace(/\+/g, " ").includes("modification demandée"), urls6[0]);
+  t("INTÉGRATION : figure remplacée dans l'historique", conv6.messages[0].figure && conv6.messages[0].figure.title === "figure modifiée par l'IA", JSON.stringify(conv6.messages[0].figure));
+  t("INTÉGRATION : mémoire mise à jour", conv6.lastFigure && /remarque/.test(conv6.lastFigure.desc), JSON.stringify(conv6.lastFigure && conv6.lastFigure.desc));
+  delete global.fetch;
+
   // --- mémoire des photos d'exercice ---
   console.log("--- mémoire des photos (resolveSendImages) ---");
   const convPhoto = { id: "p1", messages: [
@@ -289,6 +306,17 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   t("message sans image → rien", L.resolveSendImages([], convMsgSansImg).length === 0);
   L.clearImageMemory(convPhoto);
   t("clearImageMemory oublie la photo", convPhoto.lastImageRef === undefined, String(convPhoto.lastImageRef));
+
+  console.log("--- remarques de modification de la figure ---");
+  const convR = { id: "r1", messages: [], lastFigure: { png: "data:image/png;base64,F", desc: "Figure : courbe de f(x)=x^2-2x+1", title: "courbe" } };
+  t("remarque : ajouter la zone de solution", L.detectFigureRemark("Ajoute la zone de solution pour cette inéquation graphique", convR) !== null);
+  t("remarque : colorie le triangle", L.detectFigureRemark("Colorie le triangle ABC en bleu", convR) !== null);
+  t("remarque : trace aussi la droite y=x", L.detectFigureRemark("Trace aussi la droite y=x sur la figure", convR) !== null);
+  t("remarque : complète avec l'asymptote", L.detectFigureRemark("Complète la figure avec l'asymptote horizontale", convR) !== null);
+  t("remarque : change la couleur", L.detectFigureRemark("Change la couleur de la courbe en rouge", convR) !== null);
+  t("pas remarque : nouvelle courbe", L.detectFigureRemark("Trace la courbe de f(x)=x²-2x+1", convR) === null);
+  t("pas remarque : question théorique", L.detectFigureRemark("Explique-moi le théorème de Pythagore", convR) === null);
+  t("pas remarque : sans figure mémorisée", L.detectFigureRemark("Ajoute la zone de solution", { id: "r2", messages: [] }) === null);
 
   console.log("--- mémoire de la figure construite ---");
   const convFig = { id: "f1", messages: [], lastFigure: { png: "data:image/png;base64,FIG1", title: "courbe", desc: "Courbe de f(x)=x^2, tangente en x=2" } };
