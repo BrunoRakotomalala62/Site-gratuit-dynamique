@@ -87,6 +87,11 @@ sur Vercel, branché sur l'API gratuite
   trapèzes, pentagones, hexagones, symétries centrale/axiale, translation,
   rotation, homothétie, longueurs (« AB = 5 cm »), angles mesurés
   (« ABC = 45° »).
+- 🧠 **Vérification IA + complétion** : après le tracé exact, l'IA contrôle
+  que la figure couvre tout l'énoncé (dimensions données, points, angles,
+  transformations…). Si des éléments manquent, l'IA **refait la figure
+  complète** et les ajoute (légende « Figure générée par IA » + titre
+  « complétée par l'IA ») ; sinon la figure exacte est affichée.
 - 🧠 **Repli IA pour toutes les constructions** : si le moteur exact ne
   reconnaît pas la construction (« Construis un angle de 30° »…), l'IA
   dessine quand même un SVG (légende honnête « Figure générée par IA

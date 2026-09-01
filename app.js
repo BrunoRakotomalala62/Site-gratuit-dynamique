@@ -443,10 +443,12 @@ function detectGeometryRequest(userText, replyText) {
   return null;
 }
 
-/* Appelle /api/geo et renvoie { svg, mode } où mode vaut :
-   - "exact" : figure construite par le moteur déterministe (calculée, vraie) ;
-   - "ia"    : repli IA — le moteur n'a pas reconnu la construction, le modèle
-     a dessiné un SVG approximatif. */
+/* Appelle /api/geo et renvoie { svg, mode, verification } :
+   - mode "exact" : figure construite par le moteur déterministe (calculée,
+     vraie), vérifiée par l'IA (verification.complet) ;
+   - mode "ia"    : l'IA a dessiné la figure — soit en repli (construction
+     non reconnue), soit après vérification pour COMPLÉTER ce qui manquait
+     (verification.complet === false + verification.manquant). */
 async function fetchGeoFigure(text) {
   const params = new URLSearchParams();
   params.set("text", String(text || "").slice(0, 3000));
@@ -463,7 +465,13 @@ async function fetchGeoFigure(text) {
     if (!data || !data.success || !data.svg) {
       throw new Error((data && data.error) || `Erreur HTTP ${res.status}`);
     }
-    return { svg: data.svg, mode: data.mode === "ia" ? "ia" : "exact" };
+    return {
+      svg: data.svg,
+      mode: data.mode === "ia" ? "ia" : "exact",
+      verification: data.verification && typeof data.verification.complet === "boolean"
+        ? data.verification
+        : null,
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -715,8 +723,11 @@ async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, ha
       scrollToBottom();
       try {
         const res = await fetchGeoFigure(geoText);
+        // mode "ia" + vérification incomplète → l'IA a complété la figure ;
+        // mode "ia" seul → repli IA ; sinon figure exacte vérifiée.
+        const complete = res.verification && res.verification.complet === false;
         const title = res.mode === "ia"
-          ? "construction géométrique (IA)"
+          ? (complete ? "construction géométrique complétée par l'IA" : "construction géométrique (IA)")
           : "construction géométrique";
         replyMsg.figure = { svg: res.svg, title };
         touchConversation(conv.id);

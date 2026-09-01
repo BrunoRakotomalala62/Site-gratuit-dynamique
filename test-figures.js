@@ -189,7 +189,12 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
 
   global.fetch = async () => ({ json: async () => ({ success: true, svg: "<svg></svg>", mode: "ia" }) });
   const r2 = await fetchGeoFigure("Construire un angle de 30°");
-  t("mode ia transmis par l'API", r2 && r2.mode === "ia", JSON.stringify(r2));
+  t("mode ia transmis par l'API", r2 && r2.mode === "ia" && r2.verification === null, JSON.stringify(r2));
+  delete global.fetch;
+
+  global.fetch = async () => ({ json: async () => ({ success: true, svg: "<svg></svg>", mode: "ia", verification: { complet: false, manquant: ["triangle DEF (dimensions)"], note: "dimensions absentes" } }) });
+  const r3 = await fetchGeoFigure("Tracer le triangle DEF tel que DE = 3 cm, DF = 4 cm, EF = 5 cm.");
+  t("verification transmise par l'API", r3 && r3.verification && r3.verification.complet === false && r3.verification.manquant.length === 1, JSON.stringify(r3));
   delete global.fetch;
 
   // intégration : maybeBuildFigure route un énoncé géométrique vers /api/geo
@@ -231,6 +236,20 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   t("INTÉGRATION : bloc marqué figure-ia", replacedNode && /figure-ia/.test(replacedNode.className), replacedNode && replacedNode.className);
   t("INTÉGRATION : légende « générée par IA »", labelSpan && labelSpan.innerHTML === "Figure générée par IA", labelSpan && labelSpan.innerHTML);
   t("INTÉGRATION : note approximative affichée", noteSpan && /approximative/.test(noteSpan.innerHTML), noteSpan && noteSpan.innerHTML);
+  delete global.fetch;
+
+  // intégration : vérification IA incomplète → « complétée par l'IA »
+  const urls4 = [];
+  global.fetch = async (url) => {
+    urls4.push(String(url));
+    return { json: async () => ({ success: true, svg: "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\" fill=\"white\"/></svg>", mode: "ia", verification: { complet: false, manquant: ["triangle DEF (dimensions)"], note: "dimensions absentes" } }) };
+  };
+  const conv4 = { id: "c4" };
+  const replyMsg4 = { role: "assistant", text: "ok" };
+  const replyEl4 = { querySelector: () => ({ appendChild: () => {}, isConnected: true, replaceWith: () => {}, remove: () => {} }) };
+  global.document.querySelector = () => ({ scrollTo: () => {}, style: {} });
+  await window.Lumina.maybeBuildFigure("Tracer le triangle DEF tel que DE = 3 cm, DF = 4 cm, EF = 5 cm.", "", conv4, replyMsg4, replyEl4, false);
+  t("INTÉGRATION : vérification incomplète → titre « complétée par l'IA »", replyMsg4.figure && replyMsg4.figure.title === "construction géométrique complétée par l'IA", JSON.stringify(replyMsg4.figure));
   delete global.fetch;
 
   console.log("");
