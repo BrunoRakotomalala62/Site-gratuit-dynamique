@@ -731,7 +731,7 @@ async function maybeBuildFigure(userText, replyText, conv, replyMsg, replyEl, ha
   const hasFig = !!(conv && (conv.lastFigure || (conv.messages || []).some((m) => m.figure)));
   const u = String(userText || "");
   if (hasFig && /expliqu|pourquoi|comment|que\s+repr|quel|quelle|question|signifi|aide/i.test(u) &&
-      !/trace|dessine|construi|repr[eé]sente|graphique|courbe/i.test(u)) {
+      !/trace|dessine|construi|graphique|courbe/i.test(u)) {
     return;
   }
 

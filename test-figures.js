@@ -266,6 +266,8 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   t("INTÉGRATION : question sur la figure → AUCUNE nouvelle figure", urls5.length === 0, String(urls5.length));
   await window.Lumina.maybeBuildFigure("Trace aussi la courbe de g(x)=x+1", "ok", conv5, replyMsg5, replyEl5, false);
   t("INTÉGRATION : nouvelle demande de dessin → figure construite", urls5.length === 1, String(urls5.length));
+  await window.Lumina.maybeBuildFigure("Que représente le point de contact sur cette figure ?", "La courbe est une parabole.", conv5, replyMsg5, replyEl5, false);
+  t("INTÉGRATION : « que représente » → AUCUNE nouvelle figure", urls5.length === 1, String(urls5.length));
   delete global.fetch;
 
   // --- mémoire des photos d'exercice ---
