@@ -1944,7 +1944,8 @@ function closeLightbox() {
 /* ---------- Textarea auto-resize ---------- */
 function autoResize(ta) {
   ta.style.height = "auto";
-  ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+  // petit rectangle au repos ; grandit avec le texte (max 110 px)
+  ta.style.height = Math.min(ta.scrollHeight, 110) + "px";
 }
 
 /* ---------- Particules ---------- */
