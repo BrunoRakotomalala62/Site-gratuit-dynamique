@@ -84,6 +84,24 @@ t("photo exercice avec tangente (via r\u00e9ponse)", JSON.stringify(d("Fais cet 
 t("tangente seule avec expression d\u00e9clenche la courbe", d("D\u00e9termine la tangente au point d'abscisse 2 de f(x)=x\u00b2-2x+1", "", false) !== null);
 t("sans tangente pas de param\u00e8tre", !JSON.stringify(d("Trace la courbe de f(x)=x\u00b2-2x+1", "", false)).includes("tangent"));
 
-console.log("");
-console.log(pass + " passed, " + fail + " failed");
-process.exit(fail ? 1 : 0);
+console.log("--- fetchFigure (URL /api/plot) ---");
+(async () => {
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return { json: async () => ({ success: true, svg: "<svg></svg>" }) };
+  };
+  const { fetchFigure } = global.window.Lumina;
+  await fetchFigure({ expression: "x^2-2x+1", tangent: 2 });
+  await fetchFigure({ subject: "un circuit" });
+  await fetchFigure({ expression: "1/x" });
+  t("tangent transmis à l'URL", calls[0].includes("tangent=2"));
+  t("expression transmise", calls[0].includes("expression=x%5E2-2x%2B1"));
+  t("subject transmis", decodeURIComponent(calls[1]).includes("subject=un circuit"));
+  t("sans tangent → pas de paramètre", !calls[2].includes("tangent"));
+  delete global.fetch;
+
+  console.log("");
+  console.log(pass + " passed, " + fail + " failed");
+  process.exit(fail ? 1 : 0);
+})();
