@@ -67,6 +67,23 @@ console.log("--- cleanSubject ---");
 t("nettoyage", L.cleanSubject("Peux-tu me dessiner un circuit \u00e9lectrique svp ?") === "un circuit \u00e9lectrique");
 t("nettoyage 2", L.cleanSubject("Trace la courbe de f(x)=x\u00b2") === "la courbe de f(x)=x\u00b2");
 
+console.log("--- extractTangent ---");
+t("tangente au point d'abscisse 2", L.extractTangent("Trace la courbe et la tangente au point d'abscisse 2") === 2);
+t("tangente en x = -1", L.extractTangent("la tangente en x = -1") === -1);
+t("tangente au point A(2 ; 4)", L.extractTangent("la tangente au point A(2 ; 4)") === 2);
+t("tangente au point B(-1; 3)", L.extractTangent("la tangente au point B(-1; 3)") === -1);
+t("tangente en 0,5", L.extractTangent("la tangente en 0,5") === 0.5);
+t("tangente au point d'abscisse 1/2", L.extractTangent("la tangente au point d'abscisse 1/2") === 0.5);
+t("pas de tangente demandée", L.extractTangent("Trace la courbe de f(x)=x\u00b2") === null);
+t("pas de mot tangente", L.extractTangent("calcule la d\u00e9riv\u00e9e en x=2") === null);
+
+console.log("--- detectFigureRequest avec tangente ---");
+t("courbe + tangente au point d'abscisse 2", JSON.stringify(d("Trace la courbe de f(x)=x\u00b2-2x+1 et la tangente au point d'abscisse 2", "", false)).includes('"tangent":2'));
+t("courbe + tangente en x=-1", JSON.stringify(d("Trace la courbe de f(x)=x\u00b3 et la tangente en x=-1", "", false)).includes('"tangent":-1'));
+t("photo exercice avec tangente (via r\u00e9ponse)", JSON.stringify(d("Fais cet exercice", "1. Trace la courbe de f(x)=x\u00b2-2x+1\n2. Trace la tangente au point d'abscisse 2", true)).includes('"tangent":2'));
+t("tangente seule avec expression d\u00e9clenche la courbe", d("D\u00e9termine la tangente au point d'abscisse 2 de f(x)=x\u00b2-2x+1", "", false) !== null);
+t("sans tangente pas de param\u00e8tre", !JSON.stringify(d("Trace la courbe de f(x)=x\u00b2-2x+1", "", false)).includes("tangent"));
+
 console.log("");
 console.log(pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

@@ -55,6 +55,16 @@ sur Vercel, branché sur l'API gratuite
     construite automatiquement.
   La figure est affichée en image (SVG), avec un bouton **« ⬇️ Télécharger en
   PNG »**, et elle est conservée dans l'historique (localStorage).
+- 🧭 **Branches infinies, asymptotes & tangente** (mode courbe) : le moteur
+  détecte automatiquement les **asymptotes verticales, horizontales, obliques**
+  et les **branches paraboliques** de la fonction, les **trace en pointillés**
+  dans la figure avec une légende (« Asymptote verticale : x = 0 »,
+  « Asymptote oblique : y = 2x + 2 », « Branche parabolique… »). S'il n'y en a
+  pas, seule la courbe est tracée. La **tangente** n'est dessinée que si un
+  point de tangence est donné par le sujet ou l'utilisateur :
+  « … et la tangente au point d'abscisse 2 », « tangente en x = -1 »,
+  « tangente au point A(2 ; 4) » — l'équation s'affiche dans la légende
+  (« Tangente en x = 2 : y = 2x - 3 »), rien sinon.
 - 🌍 100 % côté client, zéro build, pas de clé API.
 
 ## 🚀 Déploiement

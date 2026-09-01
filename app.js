@@ -417,16 +417,47 @@ function subjectFromReply(replyText) {
   return null;
 }
 
+/* Extrait l'abscisse du point de tangence demandé (ex. « tangente au point
+   d'abscisse 2 », « tangente en x = -1 », « tangente au point A(2 ; 4) »).
+   Renvoie un nombre (fraction 1/2 → 0.5) ou null si aucune tangente n'est
+   demandée. La tangente n'est tracée QUE si ce point est donné. */
+function extractTangent(text) {
+  if (!text || !/tangente/i.test(String(text))) return null;
+  const src = String(text);
+  const num = "([+-]?\\d+\\s*\\/\\s*\\d+|[+-]?\\d+(?:[.,]\\d+)?)";
+  const toNum = (raw) => {
+    const s = raw.replace(/\s+/g, "");
+    if (s.includes("/")) {
+      const [a, b] = s.split("/").map(Number);
+      if (b && Number.isFinite(a / b)) return a / b;
+      return null;
+    }
+    const v = Number(s.replace(",", "."));
+    return Number.isFinite(v) ? v : null;
+  };
+  let m = src.match(new RegExp("abscisse\\s*" + num, "i"));            // d'abscisse 2
+  if (!m) m = src.match(new RegExp("point\\s*[A-Za-z]?\\s*\\(\\s*" + num, "i")); // A(2 ; 4)
+  if (!m) m = src.match(new RegExp("tangente\\s+(?:à\\s+la\\s+courbe\\s+)?en\\s*x\\s*=\\s*" + num, "i"));
+  if (!m) m = src.match(new RegExp("tangente\\s+en\\s*" + num, "i"));  // tangente en 2
+  if (!m) return null;
+  const v = toNum(m[1]);
+  return v === null ? null : Number(v.toFixed(6));
+}
+
 /* Détecte si la demande (texte utilisateur + réponse du bot) appelle une figure. */
 function detectFigureRequest(userText, replyText, hasImages) {
   const user = String(userText || "");
   const reply = String(replyText || "");
   const intentUser = hasFigureIntent(user);
   const exprUser = extractExpression(user);
+  const tangentUser = extractTangent(user);
 
-  // 1) courbe avec expression : « trace la courbe de f(x)=… », « étudie f(x)=… »
-  if (exprUser && (intentUser || /étudi/i.test(user))) {
-    return { expression: exprUser.send, display: exprUser.display, subject: cleanSubject(user) };
+  // 1) courbe avec expression : « trace la courbe de f(x)=… », « étudie f(x)=… »,
+  //    « trace la courbe et la tangente au point d'abscisse 2 »
+  if (exprUser && (intentUser || /étudi/i.test(user) || tangentUser)) {
+    const req = { expression: exprUser.send, display: exprUser.display, subject: cleanSubject(user) };
+    if (tangentUser !== null) req.tangent = tangentUser;
+    return req;
   }
   // 2) figure / schéma demandé sans expression → dessin par IA
   if (intentUser) {
@@ -437,8 +468,11 @@ function detectFigureRequest(userText, replyText, hasImages) {
   if (hasImages && reply) {
     const exprReply = extractExpression(reply);
     const intentReply = hasFigureIntent(reply);
-    if (exprReply && intentReply) {
-      return { expression: exprReply.send, display: exprReply.display, subject: subjectFromReply(reply) };
+    const tangentReply = extractTangent(reply);
+    if (exprReply && (intentReply || tangentReply)) {
+      const req = { expression: exprReply.send, display: exprReply.display, subject: subjectFromReply(reply) };
+      if (tangentReply !== null) req.tangent = tangentReply;
+      return req;
     }
     if (intentReply) {
       const subject = subjectFromReply(reply) || cleanSubject(user);
@@ -448,7 +482,9 @@ function detectFigureRequest(userText, replyText, hasImages) {
   return null;
 }
 
-/* Appelle /api/plot et renvoie { svg, expression | subject, … }. */
+/* Appelle /api/plot et renvoie { svg, expression | subject, … }.
+   Les asymptotes / branches infinies sont détectées par l'API ; la tangente
+   n'est demandée que si un point de tangence a été fourni. */
 async function fetchFigure(req) {
   const params = new URLSearchParams();
   params.set("format", "json");
@@ -456,6 +492,9 @@ async function fetchFigure(req) {
   params.set("height", "520");
   if (req.expression) params.set("expression", req.expression);
   else params.set("subject", req.subject);
+  if (req.tangent !== undefined && req.tangent !== null) {
+    params.set("tangent", req.tangent);
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 75000);
@@ -1455,7 +1494,7 @@ function init() {
 window.Lumina = {
   openImage,
   // exposés aussi pour les tests / débogage
-  detectFigureRequest, normalizeExpression, extractExpression,
+  detectFigureRequest, normalizeExpression, extractExpression, extractTangent,
   hasFigureIntent, cleanSubject, figureSvgToDataUri, buildFigureBlock,
 };
 
