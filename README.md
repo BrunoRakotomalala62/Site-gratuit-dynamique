@@ -104,6 +104,12 @@ sur Vercel, branché sur l'API gratuite
   la figure + une note de contexte → le bot voit la figure et répond
   précisément. Pilule « 📐 Figure en mémoire ✕ ». Une question sur la
   figure existante ne reconstruit pas de nouvelle figure.
+- 🔁 **Remarques sur la figure → l'IA refait la construction** : l'utilisateur
+  peut demander de retoucher la figure (« ajoute la zone de solution pour
+  l'inéquation », « colorie le triangle ABC », « trace aussi la droite
+  y=x », « change la couleur »…) → l'IA redessine la figure en tenant
+  compte de la remarque et la figure est **remplacée en place** (mémoire et
+  historique mis à jour, label « figure modifiée par l'IA »).
 - 📷 **Mémoire des photos d'exercice** : la photo jointe est conservée dans
   la conversation et renvoyée automatiquement avec les questions suivantes
   (« dans cette photo, où est la solution ? »…) — le bot ne répond plus
