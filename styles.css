@@ -264,7 +264,7 @@ body {
 }
 .brand-chip-logo {
   width: 36px; height: 36px; border-radius: 12px;
-  display: grid; place-items: center; font-size: 18px;
+  display: grid; place-items: center; font-size: 14px;
   background: var(--user-grad);
   box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
 }
