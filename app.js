@@ -1581,7 +1581,12 @@ async function sendMessage(text, attachments) {
     sendBtn.disabled = false;
     sendBtn.classList.remove("sending");
     scrollToBottom();
-    input.focus();
+    // Ne pas rouvrir le clavier virtuel une fois la réponse du bot reçue :
+    // sur mobile/tactile (hover: none), on laisse le focus où il est pour
+    // lire la réponse. Le focus n'est redonné à la saisie que sur les
+    // appareils à clavier physique (desktop), où c'est confortable.
+    const coarse = window.matchMedia && window.matchMedia("(hover: none)").matches;
+    if (!coarse) input.focus();
   }
 }
 
