@@ -1022,6 +1022,18 @@ function renderConversation() {
   const conv = getConversation(store.activeId);
   const empty = $("#emptyState");
 
+  // Les envois en direct ajoutent leurs bulles dans #chatArea (et non dans
+  // #messages). Sans ce nettoyage, « Supprimer toutes les conversations »
+  // (ou supprimer la conversation active) laissait le dernier échange affiché
+  // à l'écran : seul #messages était vidé. #chatArea ne doit contenir que
+  // #emptyState et #messages.
+  const chatArea = $("#chatArea");
+  if (chatArea) {
+    [...chatArea.children].forEach((child) => {
+      if (child !== area && child !== empty) child.remove();
+    });
+  }
+
   if (!conv || !conv.messages.length) {
     empty.style.display = "";
     return;
