@@ -258,7 +258,9 @@ const MATH_PROMPT_HINT = "\n\n(Consigne de formatage : si ta réponse contient d
 /* Consigne renforcée pour Lumo : Lumo omet parfois les délimiteurs autour
    d'une équation isolée (\frac nu) → elle resterait en texte brut. On exige
    des délimiteurs systématiques, comme pour les autres modèles. */
-const LUMO_MATH_PROMPT_HINT = "\n\n(Consigne de formatage mathématique IMPORTANTE : si ta réponse contient des formules, écris-les TOUJOURS en LaTeX ET entre délimiteurs — $...$ pour une formule dans une phrase, \\\\[ ... \\\\] ou $$...$$ pour une formule seule sur sa ligne. Fractions à barre horizontale : \\frac{num}{dén}. Puissances : x^2. Indices : x_1. Ne mets JAMAIS de commande LaTeX (\frac, ^, _) sans délimiteurs : chaque formule doit être intégralement entre $...$ ou \\\\[...\\\\].)";
+const LUMO_MATH_PROMPT_HINT = String.raw`
+(Consigne de formatage mathématique IMPORTANTE : si ta réponse contient des formules, écris-les TOUJOURS en LaTeX ET entre délimiteurs — $...$ pour une formule dans une phrase, \[ ... \] ou $$...$$ pour une formule seule sur sa ligne. Fractions à barre horizontale : \frac{num}{dén}. Puissances : x^2. Indices : x_1. Ne mets JAMAIS de commande LaTeX (\frac, ^, _) sans délimiteurs : chaque formule doit être intégralement entre $...$ ou \[...\].)
+`;
 
 function looksMathy(text) {
   return /(calcul|résoud|resoud|équation|equation|intégrale|integrale|dériv|derive|fraction|racine|math|algèbre|algebre|somme|matrice|[0-9]\s*[+\-*/÷×]\s*[0-9]|frac\{|\^2)/i.test(text);
