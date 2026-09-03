@@ -236,6 +236,27 @@ function wrapBareEnvironments(content) {
   return String(content).replace(LATEX_ENV_RE, (m) => "\\[" + m + "\\]");
 }
 
+/* AJOUT — formule LaTeX « nue » sur une ligne dédiée : certains modèles
+   (Lumo en tête) écrivent parfois \frac{x}{y} SANS délimiteurs. La ligne
+   reste alors en texte brut (backslashes visibles). Si la ligne contient
+   une commande LaTeX et n'est PAS une phrase en clair (≤ 2 mots hors
+   commandes), on l'enveloppe en display (deux dollars) pour que KaTeX la
+   rende (barre de fraction horizontale, puissances, indices…). */
+function isBareLatexFormulaLine(t) {
+  if (!t || t.length > 300) return false;
+  // déjà délimité (ou environnement) : KaTeX s'en charge
+  if (/\$|\\\[|\\\]|\\\(|\\\)|\\begin\{/.test(t)) return false;
+  // pas de commande LaTeX → rien à envelopper
+  if (!/\\[A-Za-z]{2,}/.test(t)) return false;
+  // mots « en clair » restants (≥ 2 lettres, commandes et symboles retirés) :
+  // une vraie phrase (≥ 3 mots) n'est pas une formule à envelopper entière.
+  const stripped = t
+    .replace(/\\[A-Za-z]+/g, " ")
+    .replace(/[0-9{}^_=+\-*/÷×.,;:()\[\]|<>~!?'"’`′″→−–—%√∫∑∏∞∈≈≠±]/g, " ");
+  const words = stripped.split(/\s+/).filter((w) => w.length >= 2);
+  return words.length <= 2;
+}
+
 /* AJOUT — rendu fiable des maths de la nouvelle API :
    - normalise les backslashes doublés des commandes (\\frac → \frac),
      comme l'étape 2 de renderMarkdown, mais pour les blocs ```latex/```tex
@@ -263,7 +284,7 @@ const LUMO_MATH_PROMPT_HINT = String.raw`
 `;
 
 function looksMathy(text) {
-  return /(calcul|résoud|resoud|équation|equation|intégrale|integrale|dériv|derive|fraction|racine|math|algèbre|algebre|somme|matrice|[0-9]\s*[+\-*/÷×]\s*[0-9]|frac\{|\^2)/i.test(text);
+  return /(calcul|résoud|resoud|équation|equation|inéquation|inequation|intégrale|integrale|intégr|integr|dériv|derive|primitive|limite|limites|polyn|trin|bin[oô]m|mon[oô]m|fraction|racine|math|algèbre|algebre|somme|matrice|vecteur|trigonom|suite arithm|suite g[ée]om[ée]trique|fonction (f|g|h)|variations|[0-9]\s*[+\-*/÷×]\s*[0-9]|frac\{|\^[0-9x²]|x²|x³|f\(x\)|g\(x\)|h\(x\)|ln\(|log\(|exp\(|sin\(|cos\(|tan\(|√|∫)/i.test(text);
 }
 
 function renderMarkdown(src) {
@@ -327,6 +348,12 @@ function renderMarkdown(src) {
     if (!t) { flush(); continue; }
     const m = t.match(/^@@BLOCK(\d+)@@$/);
     if (m) { flush(); out.push(buildBlock(blocks[+m[1]])); continue; }
+    // Formule LaTeX « nue » (modèle sans délimiteurs) → bloc maths display
+    if (isBareLatexFormulaLine(t)) {
+      flush();
+      out.push(buildBlock({ kind: "math", content: "$" + "$" + t + "$" + "$" }));
+      continue;
+    }
     if (/^#{1,3}\s/.test(t)) {
       flush();
       const level = t.match(/^#+/)[0].length;
@@ -362,9 +389,13 @@ function buildCodeBlock(code, lang) {
     `<button class="code-copy" data-code="${encodeURIComponent(code)}">Copier</button></pre>`;
 }
 
-/* ---------- Rendu mathématique (KaTeX) ---------- */
+/* ---------- Rendu mathématique (KaTeX) ----------
+   Ordre important : le délimiteur display (deux dollars accolés) doit être
+   testé AVANT le dollar simple, sinon KaTeX auto-render découpe le bloc
+   display en deux paires vides et la formule s'affiche en LaTeX brut. */
+const DOLLAR2 = "$" + "$"; // deux dollars accolés, pour le mode display
 const MATH_DELIMITERS = [
-  { left: "$", right: "$", display: true },
+  { left: DOLLAR2, right: DOLLAR2, display: true },
   { left: "\\[", right: "\\]", display: true },
   { left: "\\(", right: "\\)", display: false },
   { left: "$", right: "$", display: false },
