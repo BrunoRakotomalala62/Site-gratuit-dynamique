@@ -21,6 +21,11 @@ const API_URL_3 = `${API_BASE_3}/api/chat`;
 const API_IMAGE_3 = `${API_BASE_3}/api/image`;
 const API_IMAGE_EDIT_3 = `${API_BASE_3}/api/image/edit`;
 const API_PLOT_URL = `${API_BASE}/api/plot`; // figures : courbes (expression=) & schémas IA (subject=)
+
+/* AJOUT — Lumo (Proton) : API l-umoprotonme.vercel.app (Lumo 2.0 Max).
+   Chat texte + vision (image_url ou upload data URL via POST). */
+const API_BASE_LUMO = "https://l-umoprotonme.vercel.app";
+const API_URL_LUMO = `${API_BASE_LUMO}/api/chat`;
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const LANG = "fr";
 const MAX_IMAGES = 4;
@@ -96,6 +101,10 @@ const MODELS = {
     ["mistralai/mistral-small-2603", "mistral small (chatipro)"],
     ["meta-llama/llama-4-maverick", "llama 4 maverick (chatipro)"],
   ],
+  "Lumo (Proton)": [
+    ["lumo-max", "Lumo 2.0 Max"],
+    ["lumo", "Lumo 2.0 (léger)"],
+  ],
   "🖼️ Images (ChatiPro)": [
     ["__img_gen__", "🎨 générer une image"],
     ["__img_edit__", "🖌️ modifier une image jointe"],
@@ -121,6 +130,7 @@ const UAI_MODELS = new Set([
 const VISION_MODELS = new Set([
   "gpt-5.6-luna", "claude-sonnet-4-20250514",
   "claude", "chatgpt", "gemini", "grok", "perplexity",
+  "lumo-max", "lumo",
 ]);
 
 /* Modèles servis par l'API ChatiPro (API_URL_3). */
@@ -134,6 +144,9 @@ const CHATI_MODELS = new Set([
 
 /* Modèles « image » ChatiPro — entrées spéciales du sélecteur : la génération
    (🎨) et la modification (🖌️) sont deux modèles séparés, visibles dans le menu. */
+/* Modèles servis par l'API Lumo (API_URL_LUMO) — Lumo 2.0 Max (Proton). */
+const LUMO_MODELS = new Set(["lumo-max", "lumo"]);
+
 const IMG_GEN_MODEL = "__img_gen__";
 const IMG_EDIT_MODEL = "__img_edit__";
 const IMAGE_MODELS = new Set([IMG_GEN_MODEL, IMG_EDIT_MODEL]);
@@ -1074,7 +1087,8 @@ function populateVisionSelect() {
   sel.innerHTML = "";
   const seen = new Set();
   for (const v of ["gpt-5.6-luna", "claude-sonnet-4-20250514",
-                   "claude", "chatgpt", "gemini", "grok", "perplexity"]) {
+                   "claude", "chatgpt", "gemini", "grok", "perplexity",
+                   "lumo-max", "lumo"]) {
     if (seen.has(v)) continue;
     seen.add(v);
     const opt = document.createElement("option");
@@ -1601,7 +1615,8 @@ async function callApi(text, attachments, modelOverride) {
   // AJOUT : route les modèles « UnlimitedAI » vers la seconde API.
   const useUAI = UAI_MODELS.has(model);
   const useChati = CHATI_MODELS.has(model);
-  const ENDPOINT = useUAI ? API_URL_2 : (useChati ? API_URL_3 : API_URL);
+  const useLumo = LUMO_MODELS.has(model);
+  const ENDPOINT = useLumo ? API_URL_LUMO : (useUAI ? API_URL_2 : (useChati ? API_URL_3 : API_URL));
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST);
 
   // AJOUT : consigne LaTeX pour les modèles UnlimitedAI sur question mathématique
@@ -1645,6 +1660,9 @@ async function callApi(text, attachments, modelOverride) {
   };
 
   try {
+    // AJOUT : Lumo (Proton) — flux dédié (réponse {ok, reply, vision, …}).
+    if (useLumo) return await callLumoApi(text, attachments, model);
+
     if (hasImages) {
       // --- Vision : POST JSON (v4) — aucune limite de longueur d'URL, image nette ---
       let res = null;
@@ -1695,6 +1713,71 @@ async function callApi(text, attachments, modelOverride) {
   } catch (err) {
     if (err.name === "AbortError") {
       throw new Error("Délai d'attente dépassé (90 s). L'API est peut-être surchargée.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ---------- Lumo (Proton) : API l-umoprotonme.vercel.app ----------
+   Texte : GET  /api/chat?prompt=&uid=&model=
+   Vision : POST /api/chat  { prompt, uid, model, images: [data:URL | http URL] }
+   Réponse : { ok, reply, model, limits, vision:{attempts,perceived}, warning }
+   (contrairement aux autres APIs qui répondent { success, reply }). */
+async function callLumoApi(text, attachments, model) {
+  const hasImages = (attachments || []).length > 0;
+  const uid = store.uid || "default";
+  const payloadModel = model === "lumo" ? "lumo" : "lumo-max";
+  const promptText = (text || "").trim().slice(0, 4000);
+  const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST).map((a) => a.value);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120000);
+  const toClient = async (res) => {
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* corps non JSON */ }
+    if (!data || typeof data !== "object") {
+      throw new Error(`Réponse invalide de l'API Lumo (HTTP ${res.status})`);
+    }
+    if (res.status === 429 || (data.error && /429/i.test(String(data.error)))) {
+      return { success: false, error: "Lumo est saturé pour le moment — réessayez dans quelques secondes.", model: payloadModel };
+    }
+    if (data.ok === true && typeof data.reply === "string") {
+      let reply = data.reply;
+      if (hasImages && data.vision && data.vision.perceived === false) {
+        // Le backend Lumo n'a pas reçu l'image (ou réponse NO_IMAGE) : on
+        // affiche un message clair au lieu du marqueur technique.
+        reply = "Je n'ai pas pu analyser l'image (le service Lumo côté vision n'était pas disponible). Réessaie dans quelques secondes !";
+      }
+      return { success: true, reply, model: data.model || payloadModel };
+    }
+    const rawErr = (data.error && (data.error.message || data.error)) || `Erreur HTTP ${res.status}`;
+    return { success: false, error: `Lumo : ${rawErr}`, model: payloadModel };
+  };
+
+  try {
+    if (hasImages) {
+      const res = await fetch(API_URL_LUMO, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ prompt: promptText, uid, model: payloadModel, images: imgs }),
+        signal: controller.signal,
+      });
+      return await toClient(res);
+    }
+    const params = new URLSearchParams();
+    params.set("prompt", promptText);
+    params.set("uid", uid);
+    params.set("model", payloadModel);
+    const res = await fetch(`${API_URL_LUMO}?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    return await toClient(res);
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error("Délai d'attente dépassé (120 s) — l'API Lumo est peut-être lente.");
     }
     throw err;
   } finally {
