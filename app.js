@@ -2185,7 +2185,27 @@ function init() {
 
   // pièces jointes
   // Le trombone est un <label for="fileInput"> natif : le navigateur ouvre
-  // lui-même le sélecteur de fichiers (aucun JS, fiable partout, même Safari/iOS).
+  // lui-même le sélecteur de fichiers (aucun JS requis — fiable Safari/iOS).
+  // Garde-fou : certains navigateurs intégrés/WebViews n'exécutent PAS
+  // l'activation du <label> (le champ ne reçoit aucun clic et rien ne
+  // s'ouvre). On détecte ce cas et on force alors input.click() dans le
+  // geste utilisateur — sans effet dans les navigateurs conformes (le clic
+  // natif arrive sur le champ avant le délai, donc aucun double dialogue).
+  let labelActivated = false;
+  $("#fileInput").addEventListener("click", () => { labelActivated = true; });
+  $("#attachBtn").addEventListener("click", () => {
+    labelActivated = false;
+    setTimeout(() => {
+      if (labelActivated) return; // l'activation native a fonctionné
+      try {
+        $("#fileInput").click();
+      } catch (err) {
+        // Sélecteur de fichiers bloqué (navigateur intégré, permissions…) :
+        // on oriente l'utilisateur vers une alternative qui fonctionne.
+        toast("📎 Sélecteur de fichiers bloqué par ce navigateur. Ouvrez le site dans Safari/Chrome, ou ajoutez l'image par URL (bouton 🔗).", "error");
+      }
+    }, 350);
+  });
   // Support clavier (Enter/Espace) pour le label :
   $("#attachBtn").addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") {
