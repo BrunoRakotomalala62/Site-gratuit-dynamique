@@ -1477,7 +1477,7 @@ async function sendMessage(text, attachments) {
     images: (attachments || []).map((a) => a.value), // nouvelles photos seulement (affichage)
     model: imageMode === "gen" ? "🎨 ChatiPro"
       : imageMode === "edit" ? "🖌️ ChatiPro"
-      : (toSend.length ? visionModel() : currentModel()), // la vision n'utilise que les 2 modèles dédiés
+      : (toSend.length && !VISION_MODELS.has(currentModel()) ? visionModel() : currentModel()), // vision : modèle choisi s'il est compatible image, sinon repli vision
     time: Date.now(),
   };
   conv.messages.push(userMsg);
