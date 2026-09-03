@@ -1729,7 +1729,10 @@ async function callLumoApi(text, attachments, model) {
   const hasImages = (attachments || []).length > 0;
   const uid = store.uid || "default";
   const payloadModel = model === "lumo" ? "lumo" : "lumo-max";
-  const promptText = (text || "").trim().slice(0, 4000);
+  let promptText = (text || "").trim().slice(0, 4000);
+  // Consigne LaTeX sur question mathématique (fractions à barre horizontale,
+  // puissances ^, indices _) — même exigence que les autres modèles du site.
+  if (looksMathy(promptText)) promptText += MATH_PROMPT_HINT;
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST).map((a) => a.value);
 
   const controller = new AbortController();
