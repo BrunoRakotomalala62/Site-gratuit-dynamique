@@ -1495,13 +1495,17 @@ const CONTEXT_STOPWORDS = new Set([
   "son", "sa", "leur", "leurs", "tout", "tous", "toute", "toutes", "aussi",
   "encore", "ainsi", "comme", "sans", "depuis", "pendant", "avant", "après",
   "deux", "trois", "premier", "voici", "voilà", "sujet", "question", "merci",
+  "ligne", "lignes", "maintenant",
 ]);
 
-/* Mots significatifs (≥ 4 lettres, sans accents ni mots-outils). */
+/* Mots significatifs (≥ 4 lettres, sans accents ni mots-outils, pluriels
+   ramenés au singulier pour comparer « voiture » et « voitures »). */
 function sigWords(text) {
   const plain = String(text).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const words = plain.match(/[a-z0-9]{4,}/g) || [];
-  return new Set(words.filter((w) => !CONTEXT_STOPWORDS.has(w)));
+  const words = (plain.match(/[a-z0-9]{4,}/g) || [])
+    .map((w) => (w.endsWith("s") && w.length > 4 ? w.slice(0, -1) : w))
+    .filter((w) => !CONTEXT_STOPWORDS.has(w));
+  return new Set(words);
 }
 
 /* Derniers échanges texte « propres » (sans erreur, sans génération
@@ -1551,9 +1555,10 @@ function buildContinuationPrompt(conv, userText) {
     // Question courte sans amorce : enchaînement — sauf si c'est une nouvelle
     // demande complète (verbe introducteur + ≥ 2 mots + aucun lien lexical).
     const freshAsk = FRESH_ASK_RE.test(low) && a.size >= 2 && overlap === 0;
-    // Message long sans amorce : même vocabulaire que le sujet précédent
-    // ⇒ on enchaîne ; sinon ⇒ nouveau thème (on coupe).
-    follow = (text.length <= FOLLOW_UP_MAX_LEN && !freshAsk) || overlap >= 2;
+    // Message plus long : le vocabulaire commun décide — 1 mot partagé suffit
+    // pour une demande courte/moyenne, 2 mots pour une longue.
+    const needOverlap = text.length <= 160 ? 1 : 2;
+    follow = (text.length <= FOLLOW_UP_MAX_LEN && !freshAsk) || overlap >= needOverlap;
   }
   if (!follow) return { kind: "new", prompt: null };
 
