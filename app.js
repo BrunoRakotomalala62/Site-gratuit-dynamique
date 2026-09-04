@@ -1627,18 +1627,45 @@ async function sendMessage(text, attachments) {
   }
 
   // AJOUT — conversation continue : quand la demande enchaîne sur l'échange
-  // précédent (« plus de détails », question courte, mêmes mots-clés…), on
-  // joint le mini-contexte au prompt ; si l'utilisateur change de thème, on
-  // n'ajoute rien et le bot repart de zéro. Chat texte uniquement.
+  // précédent (« plus de détails », question courte, mêmes mots-clés…).
+  // Deux stratégies selon le backend de la demande :
+  //   - API chat-free-gpt (modèles GPT/DeepSeek/Claude/Gemini « site »…) :
+  //     la continuité est gérée PAR L'API (paramètres history/reset) — on
+  //     n'enveloppe PAS le prompt ici (éviter un double contexte).
+  //   - Autres backends (UnlimitedAI, ChatiPro, Lumo) : mini-contexte
+  //     embarqué côté client dans le prompt.
+  // Si l'utilisateur change de thème, aucun contexte n'est transmis et le
+  // bot repart de zéro. Pas appliqué à la génération d'image.
   let contNote = null;
-  if (imageMode === "chat" && (!attachments || !attachments.length)) {
-    const cont = buildContinuationPrompt(conv, sendText);
-    if (cont.kind === "follow" && cont.prompt) {
-      sendText = cont.prompt + figNote;
-      contNote = "🔁 suite de la conversation";
-    } else if (cont.kind === "new") {
-      contNote = "💬 nouveau sujet";
-      sendText += figNote;
+  let convCtx = null; // { history, reset } pour l'API chat-free-gpt
+  if (imageMode === "chat") {
+    const selForApi = currentModel();
+    const effForApi = (toSend.length && !VISION_MODELS.has(selForApi)) ? visionModel() : selForApi;
+    const chatFreeGptHandles =
+      !UAI_MODELS.has(effForApi) && !CHATI_MODELS.has(effForApi) && !LUMO_MODELS.has(effForApi);
+    const firstMsg = !(conv.messages || []).some((m) => m.role === "assistant");
+
+    if (chatFreeGptHandles) {
+      // Historique de CETTE conversation (les échanges y sont déjà en clair) ;
+      // reset=1 au premier message / quand on joint de nouvelles photos :
+      // la mémoire serveur d'un autre sujet ne doit pas polluer la demande.
+      const past = (!attachments || !attachments.length) ? lastUsableExchanges(conv) : [];
+      convCtx = { history: past, reset: firstMsg || (attachments && attachments.length > 0) };
+      if (!attachments || !attachments.length) {
+        const cont = buildContinuationPrompt(conv, sendText);
+        contNote = cont.kind === "follow" ? "🔁 suite de la conversation"
+          : cont.kind === "new" ? "💬 nouveau sujet" : null;
+      }
+      if (figNote) sendText += figNote;
+    } else if (!attachments || !attachments.length) {
+      const cont = buildContinuationPrompt(conv, sendText);
+      if (cont.kind === "follow" && cont.prompt) {
+        sendText = cont.prompt;
+        contNote = "🔁 suite de la conversation";
+      } else if (cont.kind === "new") {
+        contNote = "💬 nouveau sujet";
+      }
+      if (figNote) sendText += figNote;
     }
   } else if (figNote) {
     sendText += figNote;
@@ -1711,7 +1738,7 @@ async function sendMessage(text, attachments) {
       return; // le bloc finally fait le ménage (sending, historique, scroll…)
     }
 
-    const data = await callApi(sendText, toSend);
+    const data = await callApi(sendText, toSend, undefined, convCtx);
     // retirer l'indicateur
     typing.remove();
 
@@ -1784,7 +1811,7 @@ async function sendMessage(text, attachments) {
   }
 }
 
-async function callApi(text, attachments, modelOverride) {
+async function callApi(text, attachments, modelOverride, convCtx) {
   const hasImages = (attachments || []).length > 0;
   // Vision (image jointe) : 2 modèles uniquement (gpt-5.6-luna ou claude sonnet 4),
   // quel que soit le modèle texte sélectionné (les autres hallucinent en vision).
@@ -1798,6 +1825,17 @@ async function callApi(text, attachments, modelOverride) {
   const useLumo = LUMO_MODELS.has(model);
   const ENDPOINT = useLumo ? API_URL_LUMO : (useUAI ? API_URL_2 : (useChati ? API_URL_3 : API_URL));
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST);
+
+  // AJOUT — conversation continue : l'API chat-free-gpt (premier backend)
+  // gère elle-même la continuité ; on lui transmet l'historique de cette
+  // conversation et, au besoin, le signal « reset » (nouvelle conversation
+  // ou nouvelles photos = nouveau sujet, on ne pollue pas la demande).
+  const viaChatFreeGpt = !useUAI && !useChati && !useLumo;
+  const historyJson =
+    viaChatFreeGpt && convCtx && Array.isArray(convCtx.history) && convCtx.history.length
+      ? JSON.stringify(convCtx.history)
+      : null;
+  const resetFlag = viaChatFreeGpt && convCtx && convCtx.reset ? 1 : 0;
 
   // AJOUT : consigne LaTeX pour les modèles UnlimitedAI sur question mathématique
   // (fraction à barre horizontale, puissances ^, indices _ — comme le premier backend).
@@ -1856,6 +1894,8 @@ async function callApi(text, attachments, modelOverride) {
             uid: store.uid,
             lang: LANG,
             images: imgs.map((a) => a.value),
+            ...(historyJson ? { history: historyJson } : {}),
+            ...(resetFlag ? { reset: 1 } : {}),
           }),
           signal: controller.signal,
         });
@@ -1879,6 +1919,8 @@ async function callApi(text, attachments, modelOverride) {
       params.set("model", model);
       params.set("uid", store.uid);
       params.set("lang", LANG);
+      if (historyJson) params.set("history", historyJson);
+      if (resetFlag) params.set("reset", "1");
       forGet.forEach((a) => params.append("image", a.value));
       return await handle(await fetch(`${ENDPOINT}?${params.toString()}`, fetchOpts));
     }
@@ -1889,6 +1931,8 @@ async function callApi(text, attachments, modelOverride) {
     params.set("model", model);
     params.set("uid", store.uid);
     params.set("lang", LANG);
+    if (historyJson) params.set("history", historyJson);
+    if (resetFlag) params.set("reset", "1");
     return await handle(await fetch(`${ENDPOINT}?${params.toString()}`, fetchOpts));
   } catch (err) {
     if (err.name === "AbortError") {
