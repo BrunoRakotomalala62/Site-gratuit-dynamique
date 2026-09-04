@@ -368,24 +368,21 @@ body {
 .msg.assistant .msg-bubble {
   position: relative;
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.055);
+  background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-bottom-left-radius: 6px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   overflow: hidden;
 }
-/* Barre dégradée animée en haut de la bulle (couleurs du thème) */
+/* Barre dégradée en haut de la bulle (couleurs du thème) — figée : les
+   animations de fond continues provoquent un affichage noir pendant le
+   défilement rapide sur certains navigateurs (artefact de compositeur). */
 .msg.assistant .msg-bubble::before {
   content: "";
   position: absolute; top: 0; left: 0; right: 0;
   height: 3px;
   background: var(--m-bar, linear-gradient(90deg, #8b5cf6, #06b6d4, #f0abfc));
-  background-size: 200% auto;
-  animation: gradMove 6s linear infinite;
   opacity: 0.95;
 }
-@keyframes gradMove { to { background-position: 200% center; } }
 
 /* ====== Palettes dynamiques (définies par le contenu de la réponse) ====== */
 .msg.assistant.theme-aurora {
@@ -420,12 +417,11 @@ body {
 }
 
 /* Application des couleurs du thème sur les éléments de la réponse */
+/* Titres : dégradé figé (idem — pas d'animation de fond pendant le scroll) */
 .msg.assistant .msg-bubble h1 {
   background: var(--m-bar, linear-gradient(90deg, #8b5cf6, #06b6d4));
   -webkit-background-clip: text; background-clip: text;
   color: transparent;
-  background-size: 200% auto;
-  animation: gradMove 6s linear infinite;
 }
 .msg.assistant .msg-bubble h2 { color: var(--m-h2, #7dd3fc); }
 .msg.assistant .msg-bubble h3 { color: var(--m-h3, #f0abfc); }
