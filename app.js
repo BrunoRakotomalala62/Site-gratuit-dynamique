@@ -480,6 +480,7 @@ function renderMessage(m) {
   const time = m.time ? new Date(m.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
   if (m.model) meta.appendChild(el("span", "m-model", m.model));
   if (time) meta.appendChild(el("span", "m-time", time));
+  if (m.note) meta.appendChild(el("span", "m-note", m.note));
   if (m.completed) meta.appendChild(el("span", "m-note", "✂️ réponse complétée"));
   if (m.images && m.images.length) meta.appendChild(el("span", "m-vision", "🖼️ vision"));
   bubble.appendChild(meta);
@@ -1458,6 +1459,122 @@ async function rememberFigure(conv, svg, title, desc) {
   try { renderAttachmentTray(); } catch (e) { /* environnement limité */ }
 }
 
+/* ============================================================
+   Conversation continue — mémoire de l'échange précédent
+   ------------------------------------------------------------
+   Les API ne reçoivent qu'un prompt (aucun historique) : on
+   reconstruit donc côté client un mini-contexte quand la demande
+   de l'utilisateur ENCHAÎNE sur l'échange précédent (« continue »,
+   « plus de détails », question courte, mêmes mots-clés…). Si la
+   discussion change de thème, aucun contexte n'est ajouté et le
+   bot repart d'une page blanche.
+   ============================================================ */
+const CONTEXT_TURNS = 2;         // échanges (Q+R) texte mémorisés au maximum
+const CONTEXT_Q_MAX = 240;       // caractères max par question rappelée
+const CONTEXT_A_MAX = 460;       // caractères max par réponse rappelée
+const FOLLOW_UP_MAX_LEN = 60;    // message plus court que ça ⇒ enchaînement
+const CONTEXT_BUDGET = 3600;     // budget total du bloc de contexte
+
+/* Amorces qui montrent que l'utilisateur POURSUIT le sujet en cours. */
+const FOLLOW_UP_RE = /(continue|poursuis|poursuit|la suite|et ensuite|plus de détails|détail(le|les|ler|lons)?|précise|précisions|approfondis|approfondir|développe|développer|explique encore|réexplique|ré-explique|reformule|autre exemple|un exemple|exemple concret|pas compris|comprends pas|n'ai pas compris|en savoir plus|vas-y|vas y|qu'?est-ce que tu (veux|voulais) dire)/i;
+
+/* Formules qui signalent un NOUVEAU sujet : on coupe la mémoire. */
+const NEW_TOPIC_RE = /^(chang(eons|er|e)( de)?|on (change|passe)|passons à|autre (sujet|thème|theme|question)|nouveau (sujet|thème|theme)|nouvelle question|oublie (ma |la |toute |tout |ça |cette )?(question|conversation|discussion|sujet)|ignore (ma |la |toute |tout |ça |cette )?(question|conversation|discussion|sujet)|parlons d'autre chose|repartons de zéro|question sans rapport|sujet sans rapport)/i;
+
+/* Verbes qui introduisent une demande complète (nouvelle question). */
+const FRESH_ASK_RE = /^(explique|donne|raconte|décris|présente|parle|que sais|c'?est quoi|qu'?est-ce que|quel|quelle|quels|quelles|liste|montre|trace|calcule|résume|compare|définis)/i;
+
+const CONTEXT_STOPWORDS = new Set([
+  "avec", "dans", "pour", "mais", "donc", "alors", "quand", "quoi", "comment",
+  "pourquoi", "est", "sont", "être", "avoir", "avez", "votre", "vous", "moi",
+  "toi", "nous", "elle", "elles", "sur", "sous", "entre", "chez", "une",
+  "des", "les", "aux", "pas", "plus", "très", "bien", "faire", "fait",
+  "peux", "peut", "sais", "sait", "dire", "dis", "explique", "donne",
+  "trouve", "montre", "trace", "calcule", "écris", "resume", "résume",
+  "décris", "qui", "que", "quel", "quelle", "quels", "quelles", "ses",
+  "son", "sa", "leur", "leurs", "tout", "tous", "toute", "toutes", "aussi",
+  "encore", "ainsi", "comme", "sans", "depuis", "pendant", "avant", "après",
+  "deux", "trois", "premier", "voici", "voilà", "sujet", "question", "merci",
+]);
+
+/* Mots significatifs (≥ 4 lettres, sans accents ni mots-outils). */
+function sigWords(text) {
+  const plain = String(text).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const words = plain.match(/[a-z0-9]{4,}/g) || [];
+  return new Set(words.filter((w) => !CONTEXT_STOPWORDS.has(w)));
+}
+
+/* Derniers échanges texte « propres » (sans erreur, sans génération
+   d'image), du plus récent au plus ancien — au plus CONTEXT_TURNS. */
+function lastUsableExchanges(conv) {
+  const out = [];
+  if (!conv || !Array.isArray(conv.messages)) return out;
+  const msgs = conv.messages;
+  for (let i = msgs.length - 1; i >= 1 && out.length < CONTEXT_TURNS; i--) {
+    const m = msgs[i];
+    if (!m || m.role !== "assistant") continue;
+    const t = (m.text || "").trim();
+    if (!t || m.error) continue;                       // pas d'erreur
+    if (m.images && m.images.length) continue;         // pas de réponse image
+    if (/^[🎨🖼️]|ChatiPro/.test(t + " " + (m.model || ""))) continue;
+    const q = msgs[i - 1];
+    if (!q || q.role !== "user") continue;
+    const qt = (q.text || "").replace(/^[🎨🖼️]\s*/, "").trim();
+    if (!qt) continue;
+    out.push({ q: qt, a: t });
+  }
+  return out;
+}
+
+/* Fabrique le prompt avec le mini-contexte quand la demande enchaîne.
+   kind : "follow" → contexte ajouté ; "new" → nouveau sujet (contexte
+   ignoré) ; null → pas d'échange antérieur exploitable. */
+function buildContinuationPrompt(conv, userText) {
+  const ex = lastUsableExchanges(conv);
+  if (!ex.length) return { kind: null, prompt: null };
+  const text = (userText || "").trim();
+  if (!text) return { kind: null, prompt: null };
+  const low = text.toLowerCase();
+
+  if (NEW_TOPIC_RE.test(low)) return { kind: "new", prompt: null };
+
+  const a = sigWords(text);
+  // Vocabulaire du sujet précédent = question + réponse (l'utilisateur peut
+  // référencer des mots de la RÉPONSE : « et les rois merina ? »…).
+  const b = new Set([...sigWords(ex[0].q), ...sigWords(ex[0].a)]);
+  let overlap = 0;
+  for (const w of a) if (b.has(w)) overlap++;
+
+  const kwFollow = FOLLOW_UP_RE.test(low);
+  let follow = kwFollow;
+  if (!follow) {
+    // Question courte sans amorce : enchaînement — sauf si c'est une nouvelle
+    // demande complète (verbe introducteur + ≥ 2 mots + aucun lien lexical).
+    const freshAsk = FRESH_ASK_RE.test(low) && a.size >= 2 && overlap === 0;
+    // Message long sans amorce : même vocabulaire que le sujet précédent
+    // ⇒ on enchaîne ; sinon ⇒ nouveau thème (on coupe).
+    follow = (text.length <= FOLLOW_UP_MAX_LEN && !freshAsk) || overlap >= 2;
+  }
+  if (!follow) return { kind: "new", prompt: null };
+
+  // Construit le bloc de contexte (échanges du plus ancien au plus récent).
+  const parts = ex.slice().reverse();
+  const lines = ["[Contexte — conversation en cours. Répondez à la dernière demande de l'utilisateur en vous appuyant sur l'échange ci-dessous, SANS répéter ce qui a déjà été répondu. Si la dernière demande porte sur un sujet DIFFÉRENT, ignorez le contexte et répondez-y comme à une nouvelle question.]"];
+  for (const e of parts) {
+    lines.push("— Question de l'utilisateur : « " + e.q.slice(0, CONTEXT_Q_MAX) + " »");
+    lines.push("— Réponse déjà donnée : « " + e.a.slice(0, CONTEXT_A_MAX) + " »");
+  }
+  const header = lines.join("\n");
+  // Dernière demande toujours présente (jamais tronquée par la limite API).
+  let block = header;
+  let demand = "— Dernière demande : « " + text + " »";
+  // Texte démesuré : on n'attache pas de contexte (la demande domine le prompt).
+  if (text.length > CONTEXT_BUDGET - 250) return { kind: null, prompt: null };
+  const hardCap = CONTEXT_BUDGET - demand.length - 80;
+  if (block.length > hardCap) block = block.slice(0, Math.max(0, hardCap));
+  return { kind: "follow", prompt: block + "\n" + demand };
+}
+
 async function sendMessage(text, attachments) {
   const input = $("#input");
   const sendBtn = $("#sendBtn");
@@ -1497,10 +1614,29 @@ async function sendMessage(text, attachments) {
   // Note de contexte ajoutée à la question quand la figure mémorisée est
   // jointe (le bot sait ce que représente l'image) — le texte affiché
   // dans la bulle reste celui de l'utilisateur.
-  let sendText = text;
+  let sendText = text.trim();
   const fig = conv.lastFigure;
+  let figNote = "";
   if (fig && fig.png && fig.desc && !(attachments && attachments.length)) {
-    sendText = text.trim() + `\n\n(Contexte — figure construite précédemment, jointe en image : ${fig.desc})`;
+    figNote = `\n\n(Contexte — figure construite précédemment, jointe en image : ${fig.desc})`;
+  }
+
+  // AJOUT — conversation continue : quand la demande enchaîne sur l'échange
+  // précédent (« plus de détails », question courte, mêmes mots-clés…), on
+  // joint le mini-contexte au prompt ; si l'utilisateur change de thème, on
+  // n'ajoute rien et le bot repart de zéro. Chat texte uniquement.
+  let contNote = null;
+  if (imageMode === "chat" && (!attachments || !attachments.length)) {
+    const cont = buildContinuationPrompt(conv, sendText);
+    if (cont.kind === "follow" && cont.prompt) {
+      sendText = cont.prompt + figNote;
+      contNote = "🔁 suite de la conversation";
+    } else if (cont.kind === "new") {
+      contNote = "💬 nouveau sujet";
+      sendText += figNote;
+    }
+  } else if (figNote) {
+    sendText += figNote;
   }
 
   empty.style.display = "none";
@@ -1518,6 +1654,7 @@ async function sendMessage(text, attachments) {
       : (toSend.length && !VISION_MODELS.has(currentModel()) ? visionModel() : currentModel()), // vision : modèle choisi s'il est compatible image, sinon repli vision
     time: Date.now(),
   };
+  if (contNote) userMsg.note = contNote;
   conv.messages.push(userMsg);
   if (userMsg.images.length) conv.lastImageRef = conv.messages.length - 1;
   if (!conv.title) conv.title = text.trim().slice(0, 46) || "Conversation";
