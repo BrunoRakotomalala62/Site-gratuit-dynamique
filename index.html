@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=15" />
+<link rel="stylesheet" href="styles.css?v=16" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>" />
 </head>
 <body>
@@ -165,6 +165,23 @@
 <!-- ===== Toasts ===== -->
 <div id="toasts" class="toasts"></div>
 
-<script src="app.js?v=38"></script>
+<!-- ===== Boîte de confirmation personnalisée =====
+     Remplace window.confirm() : la boîte native affichait l'URL de la page
+     comme titre (et peut être bloquée dans les WebView Android). Cette
+     modale HTML fonctionne partout, dans le style du site. -->
+<div id="confirmModal" class="confirm-modal" hidden>
+  <div class="confirm-overlay" id="confirmOverlay"></div>
+  <div class="confirm-box glass" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMsg">
+    <div class="confirm-icon">🗑️</div>
+    <div class="confirm-title" id="confirmTitle">Confirmation</div>
+    <div class="confirm-msg" id="confirmMsg"></div>
+    <div class="confirm-actions">
+      <button type="button" id="confirmCancel" class="confirm-btn confirm-cancel">Annuler</button>
+      <button type="button" id="confirmOk" class="confirm-btn confirm-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=39"></script>
 </body>
 </html>

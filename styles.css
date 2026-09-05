@@ -976,3 +976,72 @@ body {
   box-shadow: 0 0 0 1.5px rgba(167, 139, 250, 0.7), 0 0 12px rgba(167, 139, 250, 0.35);
   transform: scale(1.08);
 }
+
+/* ============================================================
+   Boîte de confirmation personnalisée (remplace window.confirm)
+   ============================================================ */
+.confirm-modal {
+  position: fixed; inset: 0; z-index: 500;
+  display: grid; place-items: center;
+  padding: 24px;
+}
+.confirm-overlay {
+  position: absolute; inset: 0;
+  background: rgba(2, 4, 12, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: fadeIn 0.2s ease both;
+}
+.confirm-box {
+  position: relative;
+  width: min(360px, 92vw);
+  padding: 22px 22px 18px;
+  border-radius: 18px;
+  text-align: center;
+  animation: zoomIn 0.22s ease both;
+  background: rgba(16, 19, 36, 0.92);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  box-shadow: 0 24px 70px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05);
+}
+.confirm-icon {
+  font-size: 30px; line-height: 1;
+  margin-bottom: 10px;
+}
+.confirm-title {
+  font-family: var(--font-display);
+  font-size: 16.5px; font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.confirm-msg {
+  font-size: 13.5px; line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre-line;
+  margin-bottom: 18px;
+}
+.confirm-actions {
+  display: flex; gap: 10px; justify-content: center;
+}
+.confirm-btn {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  font-family: var(--font-body);
+  font-size: 13.5px; font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.confirm-cancel {
+  background: rgba(255,255,255,0.07);
+  color: var(--text-primary);
+  border-color: rgba(255,255,255,0.12);
+}
+.confirm-cancel:hover { background: rgba(255,255,255,0.14); }
+.confirm-ok {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.35);
+}
+.confirm-ok:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(239, 68, 68, 0.45); }
+.confirm-ok:active { transform: translateY(0); }

@@ -1294,6 +1294,28 @@ function deleteConversation(id) {
   renderHistory();
 }
 
+/* ---------- Boîte de confirmation personnalisée ----------
+   Remplace window.confirm() (boîte native) : dans les WebView Android la
+   boîte native peut afficher l'URL de la page au lieu du message, ou être
+   bloquée. Cette modale HTML fonctionne partout, dans le style du site.
+   Utilisation : showConfirmDialog(message, () => { …si OK… }) */
+let confirmCallback = null;
+function showConfirmDialog(message, onOk) {
+  const modal = $("#confirmModal");
+  const msg = $("#confirmMsg");
+  if (!modal) return;
+  msg.textContent = message || "Confirmer ?";
+  confirmCallback = typeof onOk === "function" ? onOk : null;
+  modal.hidden = false;
+  const okBtn = $("#confirmOk");
+  if (okBtn) okBtn.focus();
+}
+function closeConfirmDialog() {
+  const modal = $("#confirmModal");
+  if (modal) modal.hidden = true;
+  confirmCallback = null;
+}
+
 /* ---------- Suppression de TOUTES les conversations ----------
    Bouton du menu hamburger. Réutilise uniquement la logique existante
    (saveHistory / renderConversation / renderHistory / closeSidebar) :
@@ -1304,18 +1326,20 @@ function deleteAllConversations() {
     toast("Aucune conversation à supprimer.", "error");
     return;
   }
-  const ok = window.confirm(
-    `Supprimer ${count} conversation${count > 1 ? "s" : ""} ?\nCette action est irréversible.`
+  // Confirmation via la modale du site (window.confirm natif remplacé).
+  showConfirmDialog(
+    `Supprimer ${count} conversation${count > 1 ? "s" : ""} ?\nCette action est irréversible.`,
+    () => {
+      store.history = [];
+      store.activeId = null;
+      saveHistory();
+      renderConversation();
+      renderHistory();
+      closeSidebar();
+      toast("Toutes les conversations ont été supprimées.", "success");
+      $("#input").focus();
+    }
   );
-  if (!ok) return;
-  store.history = [];
-  store.activeId = null;
-  saveHistory();
-  renderConversation();
-  renderHistory();
-  closeSidebar();
-  toast("Toutes les conversations ont été supprimées.", "success");
-  $("#input").focus();
 }
 
 function newConversation() {
@@ -2429,6 +2453,18 @@ function init() {
   $("#newConversation").onclick = newConversation;
   // supprimer toutes les conversations (menu hamburger)
   $("#deleteAllConversations").onclick = deleteAllConversations;
+
+  // Boîte de confirmation personnalisée (remplace window.confirm).
+  $("#confirmOk").onclick = () => {
+    const cb = confirmCallback;
+    closeConfirmDialog();
+    if (cb) cb();
+  };
+  $("#confirmCancel").onclick = closeConfirmDialog;
+  $("#confirmOverlay").onclick = closeConfirmDialog;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeConfirmDialog();
+  });
 
   // envoi
   $("#sendBtn").onclick = () => {
