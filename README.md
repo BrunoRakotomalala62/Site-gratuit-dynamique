@@ -14,11 +14,11 @@ qwen) est routé vers une seconde API
 de l'API se fait automatiquement selon le modèle sélectionné.
 
 **Vision** : quand une image est jointe, le site utilise le modèle choisi
-dans le menu si celui-ci est compatible image (gpt-5.6-luna, claude sonnet 4
-+ les modèles vision UnlimitedAI : claude, chatgpt, gemini, grok,
-perplexity) ; sinon il se replie sur le sélecteur « 🖼️ Vision » (lui aussi
-rempli avec tous les modèles vision). Les images sont envoyées en base64 ou
-par URL à l'API correspondante.
+dans le menu si celui-ci est compatible image (gpt-5.6-luna + les modèles
+vision UnlimitedAI : claude, chatgpt, gemini, grok, perplexity) ; sinon il
+se replie sur le sélecteur « 🖼️ Vision » (lui aussi rempli avec tous les
+modèles vision). Les images sont envoyées en base64 ou par URL à l'API
+correspondante.
 
 **AJOUT (API ChatiPro)** : le groupe *« ChatiPro (chati.pro) »* ajoute
 10 modèles (gemini 3.5 flash, gpt-5.4 nano, claude 3 haiku, deepseek v4
@@ -36,9 +36,13 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
 
 - 🎨 **UI premium & dynamique** : thème sombre, glassmorphism, fond animé
   (orbs aurora + particules), animations fluides, responsive mobile.
-- 🤖 **Menu déroulant multi-modèles** placé **sous la zone de saisie** : GPT
-  (o1, o3, gpt-5.x, gpt-4.x…), DeepSeek, Claude, Gemini, Llama, Grok, Qwen,
-  Mixtral — liste exacte des modèles gratuits testés du backend. Les modèles
+- 🤖 **Menu déroulant multi-modèles** placé **sous la zone de saisie** :
+  `ChatGPT (chat-free-gpt)` → gpt-5.6-luna (seul modèle gratuit authentique
+  de l'API historique, vérifié le 2026-09-05), plus les groupes
+  **UnlimitedAI**, **ChatiPro**, **Lumo (Proton)** et **🖼️ Images** servis
+  par leurs propres APIs. Les anciens noms d'emprunt (gpt-5.x, gpt-4.x,
+  o1/o3, claude-*, gemini-*, deepseek-*, llama, grok, qwen, mixtral) ont été
+  **retirés** : ils ne faisaient pas tourner le modèle annoncé. Les modèles
   **PRO** (`gpt-5.6-terra`, `gpt-4o`) sont signalés 🔒.
 - 📐 **Notation mathématique (KaTeX)** : indices, puissances, fractions à
   barre horizontale, racines, intégrales, matrices… rendus dans les réponses
@@ -194,7 +198,9 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
 - ✅ Chat texte : `GET /api/chat?prompt=…&model=…&uid=…` → 200 JSON
 - ✅ Vision 1 image (URL & data-URI) → réponse + `images[]`
 - ✅ Vision multi-images (2 data-URI) → comparaison + 2 entrées dans `images[]`
-- ✅ Modèles gratuits (~37 noms) vs PRO (`gpt-4o`, `gpt-5.6-terra` → 402)
+- ✅ Modèles gratuits : gpt-5.6-luna (seul modèle authentique de l'API
+  historique — les 37 autres noms testés répondaient tous « ChatGPT » et ont
+  été retirés) ; PRO (`gpt-4o`, `gpt-5.6-terra` → 402)
 - ✅ Figures : `GET /api/plot?expression=x-2ln(x)` (courbe) et
   `GET /api/plot?subject=circuit+électrique…` (schéma IA) → `{ svg }`
 - ✅ Détection figures : `node test-figures.js` (31 tests)

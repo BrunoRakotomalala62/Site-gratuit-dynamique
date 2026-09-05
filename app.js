@@ -31,53 +31,19 @@ const LANG = "fr";
 const MAX_IMAGES = 4;
 const MAX_IMAGES_PER_REQUEST = 4;
 
-/* ---------- Modèles (liste officielle testée du backend) ---------- */
+/* ---------- Modèles (liste authentique testée le 2026-09-05) ----------
+   ⚠️ L'API historique chat-free-gpt ne fait tourner qu'UN modèle gratuit
+   authentique : gpt-5.6-luna (ChatGPT). Les 37 autres noms (gpt-5.x,
+   gpt-4.x, o1/o3, claude-*, gemini-*, deepseek-*, llama, grok, qwen,
+   mixtral) répondaient tous « ChatGPT / créé par OpenAI » quand on leur
+   demandait « qui es-tu ? » : le backend les acceptait mais retombait
+   silencieusement sur le même moteur → retirés (HTTP 400 désormais).
+   Les groupes UnlimitedAI / ChatiPro / Lumo utilisent d'AUTRES APIs
+   (bon-api-fiable, chatipro, lumo) qui, elles, font tourner les modèles
+   annoncés (vérifié le 2026-09-05). */
 const MODELS = {
-  "OpenAI (GPT)": [
+  "ChatGPT (chat-free-gpt)": [
     ["gpt-5.6-luna", "gpt-5.6-luna (défaut)"],
-    ["gpt-5", "gpt-5"],
-    ["gpt-5-mini", "gpt-5-mini"],
-    ["gpt-5-nano", "gpt-5-nano"],
-    ["gpt-5.1", "gpt-5.1"],
-    ["gpt-5.1-mini", "gpt-5.1-mini"],
-    ["gpt-5.1-nano", "gpt-5.1-nano"],
-    ["gpt-5.2", "gpt-5.2"],
-    ["gpt-4o-mini", "gpt-4o-mini"],
-    ["gpt-4-turbo", "gpt-4-turbo"],
-    ["gpt-4.1", "gpt-4.1"],
-    ["gpt-4.1-mini", "gpt-4.1-mini"],
-    ["gpt-4.1-nano", "gpt-4.1-nano"],
-    ["gpt-4", "gpt-4"],
-    ["gpt-3.5-turbo", "gpt-3.5-turbo"],
-    ["o1", "o1"], ["o1-mini", "o1-mini"],
-    ["o3", "o3"], ["o3-mini", "o3-mini"], ["o4-mini", "o4-mini"],
-  ],
-  "DeepSeek": [
-    ["deepseek-chat", "deepseek-chat"],
-    ["deepseek-reasoner", "deepseek-reasoner"],
-    ["deepseek-v3", "deepseek-v3"],
-    ["deepseek-r1", "deepseek-r1"],
-  ],
-  "Claude (Anthropic)": [
-    ["claude-3-5-sonnet-20241022", "claude-3.5 sonnet"],
-    ["claude-sonnet-4-20250514", "claude sonnet 4"],
-    ["claude-3-5-haiku", "claude-3.5 haiku"],
-    ["claude-3-opus", "claude-3 opus"],
-  ],
-  "Gemini (Google)": [
-    ["gemini-1.5-pro", "gemini 1.5 pro"],
-    ["gemini-2.0-flash", "gemini 2.0 flash"],
-    ["gemini-2.5-flash", "gemini 2.5 flash"],
-    ["gemini-2.5-pro", "gemini 2.5 pro"],
-  ],
-  "Llama (Meta)": [
-    ["llama-3.3-70b-versatile", "llama 3.3 70b"],
-    ["llama-3.1-8b-instant", "llama 3.1 8b"],
-  ],
-  "Grok (xAI)": [["grok-2", "grok-2"], ["grok-3", "grok-3"]],
-  "Autres": [
-    ["qwen2.5-72b-instruct", "qwen 2.5 72b"],
-    ["mixtral-8x7b-instruct", "mixtral 8x7b"],
   ],
   "UnlimitedAI": [
     ["claude", "claude"],
@@ -123,12 +89,13 @@ const UAI_MODELS = new Set([
   "grok", "perplexity", "meta", "qwen",
 ]);
 
-/* Modèles compatibles IMAGE (vision) : les 2 dédiés de l'API historique
-   (gpt-5.6-luna, claude sonnet 4) + les modèles vision de l'API UnlimitedAI.
-   Quand une image est jointe, on utilise le modèle choisi par l'utilisateur
-   s'il fait partie de cette liste (sinon repli sur le sélecteur vision). */
+/* Modèles compatibles IMAGE (vision) : gpt-5.6-luna (API historique) +
+   les modèles vision des API UnlimitedAI (claude, chatgpt, gemini, grok,
+   perplexity) et Lumo. Quand une image est jointe, on utilise le modèle
+   choisi par l'utilisateur s'il fait partie de cette liste (sinon repli
+   sur le sélecteur vision). */
 const VISION_MODELS = new Set([
-  "gpt-5.6-luna", "claude-sonnet-4-20250514",
+  "gpt-5.6-luna",
   "claude", "chatgpt", "gemini", "grok", "perplexity",
   "lumo-max", "lumo",
 ]);
@@ -1117,15 +1084,15 @@ function currentModel() {
   return $("#modelSelect").value || DEFAULT_MODEL;
 }
 
-/* Sélecteur vision : tous les modèles compatibles image (dédiés historiques
-   + UnlimitedAI), pour le repli quand le modèle texte choisi n'est pas vision. */
+/* Sélecteur vision : modèles compatibles image (gpt-5.6-luna + UnlimitedAI
+   + Lumo), pour le repli quand le modèle texte choisi n'est pas vision. */
 function populateVisionSelect() {
   const sel = $("#visionSelect");
   if (!sel) return;
   const current = sel.value;
   sel.innerHTML = "";
   const seen = new Set();
-  for (const v of ["gpt-5.6-luna", "claude-sonnet-4-20250514",
+  for (const v of ["gpt-5.6-luna",
                    "claude", "chatgpt", "gemini", "grok", "perplexity",
                    "lumo-max", "lumo"]) {
     if (seen.has(v)) continue;
@@ -1140,7 +1107,8 @@ function populateVisionSelect() {
   }
 }
 
-/* Modèle de VISION : 2 choix uniquement (gpt-5.6-luna par défaut, claude sonnet 4) */
+/* Modèle de VISION : sélectionnable dans le sélecteur vision (gpt-5.6-luna par
+   défaut, ou un modèle vision UnlimitedAI / Lumo). */
 const LS_VISION_MODEL = "lumina.chat.visionmodel";
 function visionModel() {
   const sel = $("#visionSelect");
@@ -1813,8 +1781,8 @@ async function sendMessage(text, attachments) {
 
 async function callApi(text, attachments, modelOverride, convCtx) {
   const hasImages = (attachments || []).length > 0;
-  // Vision (image jointe) : 2 modèles uniquement (gpt-5.6-luna ou claude sonnet 4),
-  // quel que soit le modèle texte sélectionné (les autres hallucinent en vision).
+  // Vision (image jointe) : modèle compatible image si le modèle texte
+  // choisi en fait partie ; sinon repli sur le sélecteur vision dédié.
   let model = modelOverride || currentModel();
   // Vision : on respecte le modèle choisi par l'utilisateur s'il est
   // compatible image ; sinon repli sur le sélecteur vision dédié.
@@ -2394,7 +2362,7 @@ function init() {
     store.lastChatModel = IMAGE_MODELS.has(m) ? prev : m;
   });
 
-  // modèle de vision (2 choix uniquement)
+  // modèle de vision
   $("#visionSelect").addEventListener("change", () => {
     saveVisionModel();
     toast(`🖼️ Vision : ${visionModel()}`, "success");
