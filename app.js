@@ -42,7 +42,7 @@ const MAX_IMAGES_PER_REQUEST = 4;
    (bon-api-fiable, chatipro, lumo) qui, elles, font tourner les modèles
    annoncés (vérifié le 2026-09-05). */
 const MODELS = {
-  "ChatGPT (chat-free-gpt)": [
+  "ChatGPT": [
     ["gpt-5.6-luna", "gpt-5.6-luna (défaut)"],
   ],
   "UnlimitedAI": [

@@ -37,7 +37,7 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
 - 🎨 **UI premium & dynamique** : thème sombre, glassmorphism, fond animé
   (orbs aurora + particules), animations fluides, responsive mobile.
 - 🤖 **Menu déroulant multi-modèles** placé **sous la zone de saisie** :
-  `ChatGPT (chat-free-gpt)` → gpt-5.6-luna (seul modèle gratuit authentique
+  `ChatGPT` → gpt-5.6-luna (seul modèle gratuit authentique
   de l'API historique, vérifié le 2026-09-05), plus les groupes
   **UnlimitedAI**, **ChatiPro**, **Lumo (Proton)** et **🖼️ Images** servis
   par leurs propres APIs. Les anciens noms d'emprunt (gpt-5.x, gpt-4.x,
