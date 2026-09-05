@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=14" />
+<link rel="stylesheet" href="styles.css?v=15" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>" />
 </head>
 <body>
@@ -125,20 +125,32 @@
     <!-- Sélecteur de modèle : sous la saisie -->
     <div class="model-row glass">
       <span class="model-row-label">Modèle :</span>
-      <div class="model-select-wrap">
+      <div class="model-select-wrap" id="modelWrap">
         <svg class="model-select-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-4 12.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26A7 7 0 0 0 12 2z"/><path d="M9 21h6"/></svg>
-        <select id="modelSelect" class="model-select" aria-label="Choisir le modèle"></select>
+        <!-- Menu personnalisé (HTML pur) : ne déclenche AUCUN composant natif
+             Android → le plein écran (heure/batterie masquées) est conservé,
+             même menu ouvert. -->
+        <button type="button" id="modelSelectBtn" class="model-select model-select-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Choisir le modèle">
+          <span id="modelSelectLabel" class="model-btn-label">gpt-5.6-luna</span>
+          <svg class="model-btn-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div id="modelSelectMenu" class="model-menu" role="listbox" hidden></div>
+        <!-- Sélecteur natif caché : sert uniquement de source de valeur (JS) -->
+        <select id="modelSelect" class="model-select-sr" tabindex="-1" aria-hidden="true"></select>
       </div>
     </div>
 
-    <!-- Sélecteur de modèle VISION : apparaît quand une image est jointe (2 modèles uniquement) -->
+    <!-- Sélecteur de modèle VISION : apparaît quand une image est jointe -->
     <div id="visionRow" class="model-row glass" hidden>
       <span class="model-row-label">🖼️ Vision :</span>
-      <div class="model-select-wrap">
+      <div class="model-select-wrap" id="visionWrap">
         <svg class="model-select-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-        <select id="visionSelect" class="model-select model-select-vision" aria-label="Modèle pour la vision (images)">
-          <option value="gpt-5.6-luna" selected>gpt-5.6-luna</option>
-        </select>
+        <button type="button" id="visionSelectBtn" class="model-select model-select-btn model-select-vision" aria-haspopup="listbox" aria-expanded="false" aria-label="Modèle pour la vision (images)">
+          <span id="visionSelectLabel" class="model-btn-label">gpt-5.6-luna</span>
+          <svg class="model-btn-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div id="visionSelectMenu" class="model-menu model-menu-vision" role="listbox" hidden></div>
+        <select id="visionSelect" class="model-select-sr" tabindex="-1" aria-hidden="true"></select>
       </div>
     </div>
   </footer>
@@ -153,6 +165,6 @@
 <!-- ===== Toasts ===== -->
 <div id="toasts" class="toasts"></div>
 
-<script src="app.js?v=37"></script>
+<script src="app.js?v=38"></script>
 </body>
 </html>

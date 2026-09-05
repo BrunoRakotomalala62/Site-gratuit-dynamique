@@ -1062,22 +1062,126 @@ function renderConversation() {
   scrollToBottom(false);
 }
 
+/* ============================================================
+   Menus déroulants personnalisés (HTML pur)
+   ------------------------------------------------------------
+   Les anciens <select> natifs déclenchent le sélecteur SYSTÈME Android
+   dans la WebView de l'APK → sortie du plein écran (heure/batterie
+   réaffichées). On les remplace par un menu 100 % HTML/CSS/JS : aucun
+   composant natif n'est ouvert, le plein écran est conservé partout.
+   Le <select> natif reste présent mais caché (hors écran) : il sert
+   uniquement de source de valeur pour tout le code existant.
+   ============================================================ */
+
+/** Construit le menu HTML à partir d'une liste de groupes {label, options:[{value,label}]}. */
+function buildCustomMenu(menuId, btnId, labelId, selectId, groups) {
+  const menu = document.getElementById(menuId);
+  if (!menu) return;
+  menu.innerHTML = "";
+  groups.forEach((g) => {
+    if (g.label) {
+      const h = document.createElement("div");
+      h.className = "model-menu-group";
+      h.textContent = g.label;
+      menu.appendChild(h);
+    }
+    g.options.forEach(({ value, label }) => {
+      const o = document.createElement("button");
+      o.type = "button";
+      o.className = "model-menu-opt";
+      o.dataset.value = value;
+      o.textContent = label;
+      o.addEventListener("click", () => pickCustomOption(value, selectId, menuId, btnId, labelId));
+      menu.appendChild(o);
+    });
+  });
+}
+
+/** Sélectionne une option : met à jour le select caché + déclenche 'change'
+ *  (toute la logique existante — historique, toast PRO, modèle par défaut —
+ *  est branchée sur cet événement), puis ferme et resynchronise le bouton. */
+function pickCustomOption(value, selectId, menuId, btnId, labelId) {
+  const sel = document.getElementById(selectId);
+  if (!sel || !sel.querySelector(`option[value="${CSS.escape(value)}"]`)) return;
+  sel.value = value;
+  closeCustomMenus();
+  syncSelectButton(selectId, btnId, labelId);
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+/** Met le libellé du bouton + style PRO en phase avec le select caché. */
+function syncSelectButton(selectId, btnId, labelId) {
+  const sel = document.getElementById(selectId);
+  const btn = document.getElementById(btnId);
+  const lab = document.getElementById(labelId);
+  if (!sel || !btn) return;
+  const opt = sel.options[sel.selectedIndex];
+  if (lab && opt) lab.textContent = opt.textContent;
+  const isPro = PRO_MODELS.has(sel.value);
+  btn.classList.toggle("pro-selected", isPro);
+}
+
+/** Ouvre un menu positionné au-dessus du bouton (fixed : jamais rogné). */
+function openCustomMenu(menuId, btnId) {
+  closeCustomMenus();
+  const menu = document.getElementById(menuId);
+  const btn = document.getElementById(btnId);
+  if (!menu || !btn) return;
+  const r = btn.getBoundingClientRect();
+  const mw = Math.max(r.width, 250);
+  menu.style.minWidth = mw + "px";
+  menu.style.left = Math.max(6, Math.min(r.left, window.innerWidth - mw - 6)) + "px";
+  // Mesure la hauteur réelle pour choisir haut ou bas.
+  menu.style.visibility = "hidden";
+  menu.hidden = false;
+  const mh = menu.offsetHeight;
+  const spaceUp = r.top - 6;
+  const spaceDown = window.innerHeight - r.bottom - 6;
+  if (spaceUp >= mh || spaceUp >= spaceDown) {
+    menu.style.top = "auto";
+    menu.style.bottom = Math.max(6, window.innerHeight - r.top + 6) + "px";
+  } else {
+    menu.style.bottom = "auto";
+    menu.style.top = Math.min(window.innerHeight - mh - 6, r.bottom + 6) + "px";
+  }
+  menu.style.visibility = "";
+  btn.setAttribute("aria-expanded", "true");
+}
+
+function closeCustomMenus() {
+  document.querySelectorAll(".model-menu").forEach((m) => { m.hidden = true; });
+  document.querySelectorAll(".model-select-btn").forEach((b) => b.setAttribute("aria-expanded", "false"));
+}
+
+function toggleCustomMenu(menuId, btnId) {
+  const menu = document.getElementById(menuId);
+  if (!menu) return;
+  if (menu.hidden) openCustomMenu(menuId, btnId);
+  else closeCustomMenus();
+}
+
 /* ---------- Modèles : sélecteur ---------- */
 function populateModelSelect() {
   const sel = $("#modelSelect");
   sel.innerHTML = "";
+  const groups = [];
   for (const [group, list] of Object.entries(MODELS)) {
     const og = document.createElement("optgroup");
     og.label = group;
+    const items = [];
     list.forEach(([value, label]) => {
       const opt = document.createElement("option");
       opt.value = value;
       opt.textContent = label;
       if (value === DEFAULT_MODEL) opt.selected = true;
       og.appendChild(opt);
+      items.push({ value, label });
     });
     sel.appendChild(og);
+    groups.push({ label: group, options: items });
   }
+  buildCustomMenu("modelSelectMenu", "modelSelectBtn", "modelSelectLabel", "modelSelect", groups);
+  syncSelectButton("modelSelect", "modelSelectBtn", "modelSelectLabel");
 }
 
 function currentModel() {
@@ -1092,6 +1196,7 @@ function populateVisionSelect() {
   const current = sel.value;
   sel.innerHTML = "";
   const seen = new Set();
+  const items = [];
   for (const v of ["gpt-5.6-luna",
                    "claude", "chatgpt", "gemini", "grok", "perplexity",
                    "lumo-max", "lumo"]) {
@@ -1101,10 +1206,14 @@ function populateVisionSelect() {
     opt.value = v;
     opt.textContent = v;
     sel.appendChild(opt);
+    items.push({ value: v, label: v });
   }
   if (current && document.querySelector(`#visionSelect option[value="${CSS.escape(current)}"]`)) {
     sel.value = current;
   }
+  buildCustomMenu("visionSelectMenu", "visionSelectBtn", "visionSelectLabel", "visionSelect",
+                  [{ label: "", options: items }]);
+  syncSelectButton("visionSelect", "visionSelectBtn", "visionSelectLabel");
 }
 
 /* Modèle de VISION : sélectionnable dans le sélecteur vision (gpt-5.6-luna par
@@ -1123,14 +1232,13 @@ function loadVisionModel() {
     const v = localStorage.getItem(LS_VISION_MODEL);
     if (v && document.querySelector(`#visionSelect option[value="${CSS.escape(v)}"]`)) {
       $("#visionSelect").value = v;
+      syncSelectButton("visionSelect", "visionSelectBtn", "visionSelectLabel");
     }
   } catch (e) { /* noop */ }
 }
 
 function updateModelPill() {
-  const m = currentModel();
-  const isPro = PRO_MODELS.has(m);
-  $("#modelSelect").classList.toggle("pro-selected", isPro);
+  syncSelectButton("modelSelect", "modelSelectBtn", "modelSelectLabel");
 }
 
 /* ---------- Historique (sidebar) ---------- */
@@ -2367,6 +2475,30 @@ function init() {
     saveVisionModel();
     toast(`🖼️ Vision : ${visionModel()}`, "success");
   });
+
+  // --- Menus déroulants personnalisés (ouverts par un clic sur le bouton) ---
+  const btnModel = $("#modelSelectBtn");
+  const btnVision = $("#visionSelectBtn");
+  if (btnModel) {
+    btnModel.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleCustomMenu("modelSelectMenu", "modelSelectBtn");
+    });
+  }
+  if (btnVision) {
+    btnVision.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleCustomMenu("visionSelectMenu", "visionSelectBtn");
+    });
+  }
+  // Clic ailleurs ou Échap → ferme les menus.
+  document.addEventListener("click", () => closeCustomMenus());
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeCustomMenus();
+  });
+  // Ferme aussi les menus au scroll du chat (le menu est en position fixed).
+  const chatAreaEl = $("#chatArea");
+  if (chatAreaEl) chatAreaEl.addEventListener("scroll", () => closeCustomMenus(), { passive: true });
 
   // pièces jointes
   // Le trombone est un <label for="fileInput"> natif : le navigateur ouvre
