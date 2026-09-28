@@ -3166,6 +3166,58 @@ function voiceInit() {
   const assistantDone = () =>
     document.querySelectorAll("#chatArea .msg.assistant .msg-meta").length;
 
+  /* AJOUT — garde anti-boucle : reconnaît les faux textes.
+     Whisper invente des phrases sur du silence (sous-titres, Amara.org…).
+     Sans ce filtre, le site renvoyait ces inventions au bot qui répondait…
+     puis recommençait : le bot discutait tout seul. */
+  const VOICE_JUNK_RE = /(sous-titres? r[ée]alis[ée]s? par|amara\.org|merci d'avoir (regard[ée]|[ée]cout[ée])|abonnez-vous|sous-titrage|\[musique\]|\(musique\)|♪|sous-titreur|transcription par)/i;
+  let voiceLastText = "";
+  let voiceLastCount = 0;
+  const voiceCheckTranscript = (raw) => {
+    const t = String(raw || "").trim();
+    if (!t) return "empty";
+    if (VOICE_JUNK_RE.test(t)) return "junk";
+    // Même phrase plusieurs fois d'affilée → le micro capte le haut-parleur.
+    if (t === voiceLastText) {
+      voiceLastCount += 1;
+      if (voiceLastCount >= 2) return "repeat";
+    } else {
+      voiceLastText = t;
+      voiceLastCount = 0;
+    }
+    return "ok";
+  };
+
+  /* AJOUT — envoi du message transcrit, partagé par les deux modes.
+     C'est ici que se joue le tour de parole : si l'utilisateur n'a rien dit
+     (silence, bruit, invention de Whisper), on n'envoie RIEN et on attend son
+     vocal — le bot ne se répond jamais à lui-même. */
+  const voiceSubmitTranscript = (text) => {
+    const verdict = voiceCheckTranscript(text);
+    if (verdict === "repeat") {
+      if (loopStop) {
+        loopStop("🎧 La même phrase revient en boucle — le micro capte la voix du bot. Utilisez un écouteur, ou parlez plus près du micro.", "error");
+      }
+      return false;
+    }
+    if (verdict !== "ok") {
+      voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
+      if (voiceState.autoLoop && voiceState.silentTurns >= 6 && loopStop) {
+        loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
+      }
+      return false;
+    }
+    voiceState.silentTurns = 0;
+    inputEl.value = text;
+    autoResize(inputEl);
+    // On marque le tour AVANT d'envoyer (sendMessage pose `store.sending` un
+    // peu plus loin, après un await) : le micro ne peut donc pas se rouvrir
+    // pendant que la question est en cours de traitement.
+    voiceState.turn = store.sending ? null : { at: Date.now(), from: assistantDone() };
+    sendMessage(text, [...store.attachments]);
+    return true;
+  };
+
   // Définies par le mode retenu ci-dessous (dictée simple ET boucle 🎧).
   let listenStart = () => {};
   let stopListening = () => {};
@@ -3219,24 +3271,7 @@ function voiceInit() {
       setListening(false);
       const text = (finalText || inputEl.value || "").trim();
       finalText = "";
-      if (!text) {
-        // Silence : hors boucle on ne fait rien ; en discussion vocale le
-        // minuteur réarme le micro (et on abandonne après 6 silences d'affilée).
-        voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
-        if (voiceState.autoLoop && voiceState.silentTurns >= 6 && loopStop) {
-          loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
-        }
-        return;
-      }
-      voiceState.silentTurns = 0;
-      inputEl.value = text;
-      autoResize(inputEl);
-      // Envoi automatique : c'est le principe de la conversation vocale.
-      // On marque le tour AVANT d'envoyer (sendMessage pose `store.sending` un
-      // peu plus loin, après un await) : le micro ne peut donc pas se rouvrir
-      // pendant que la question est en cours de traitement.
-      voiceState.turn = store.sending ? null : { at: Date.now(), from: assistantDone() };
-      sendMessage(text, [...store.attachments]);
+      voiceSubmitTranscript(text);
     };
     voiceState.recorder = false;
   } else {
@@ -3246,6 +3281,9 @@ function voiceInit() {
        🎧 — passe par exactement les mêmes fonctions que la dictée Web Speech. */
     voiceState.recorder = true;
     let mediaRec = null, stream = null, chunks = [], watchTimer = null, audioCtx = null, recStartAt = 0, starting = false;
+    // Durée cumulée de son au-dessus du seuil : sert à savoir si quelqu'un a
+    // VRAIMENT parlé avant d'envoyer l'audio à /api/stt.
+    let loudMs = 0;
 
     const releaseStream = () => {
       if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
@@ -3261,6 +3299,16 @@ function voiceInit() {
       releaseStream();
       setListening(false);
       if (!blob.size) return;   // rien capté : le minuteur réarmera si besoin
+      if (loudMs < 250) {
+        // Personne n'a réellement parlé : on n'envoie RIEN. Sans ce garde-fou,
+        // Whisper invente du texte sur le silence (« sous-titres réalisés par… »),
+        // ce texte part comme message et le bot se répond à lui-même sans fin.
+        voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
+        if (wasLoop && voiceState.silentTurns >= 6 && loopStop) {
+          loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
+        }
+        return;
+      }
       try {
         const fd = new FormData();
         fd.append("audio", blob, "voix.webm");
@@ -3270,19 +3318,9 @@ function voiceInit() {
         if (!res.ok || !data || !data.success) {
           throw new Error((data && data.error) || `HTTP ${res.status}`);
         }
-        const text = String(data.text || "").trim();
-        if (!text) {
-          voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
-          if (wasLoop && voiceState.silentTurns >= 6 && loopStop) {
-            loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
-          }
-          return;
-        }
-        voiceState.silentTurns = 0;
-        inputEl.value = text;
-        autoResize(inputEl);
-        voiceState.turn = store.sending ? null : { at: Date.now(), from: assistantDone() };
-        sendMessage(text, [...store.attachments]);
+        // Le filtre anti-hallucination et le tour de parole sont dans
+        // voiceSubmitTranscript, partagé avec le mode Web Speech.
+        voiceSubmitTranscript(String(data.text || "").trim());
       } catch (err) {
         toast("🎙️ Transcription impossible : " + (err && err.message ? err.message : err), "error");
         if (wasLoop && loopStop) loopStop("🎧 Discussion vocale arrêtée (transcription indisponible).");
@@ -3303,7 +3341,7 @@ function voiceInit() {
           analyser.getByteTimeDomainData(buf);
           let sum = 0;
           for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
-          if (Math.sqrt(sum / buf.length) > SILENCE_RMS) lastLoud = Date.now();
+          if (Math.sqrt(sum / buf.length) > SILENCE_RMS) { lastLoud = Date.now(); loudMs += 100; }
           const elapsed = Date.now() - recStartAt;
           if (elapsed > MAX_MS || (elapsed > MIN_MS && Date.now() - lastLoud > SILENCE_MS)) stopListening();
         }, 100);
@@ -3316,6 +3354,7 @@ function voiceInit() {
     listenStart = async () => {
       if (voiceState.listening || starting) return;
       finalText = "";
+      loudMs = 0;
       starting = true;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
