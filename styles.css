@@ -468,6 +468,17 @@ body {
 .msg-images.grid-1 img { max-height: 380px; }
 .msg-images img:hover { transform: scale(1.015); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 
+/* AJOUT : pièces jointes PDF dans les bulles (texte extrait, non affiché) */
+.msg-pdfs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.msg-pdf-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 10px; font-size: 12px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #7dd3fc;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* Figures construites (courbes & schémas) — image envoyée par l'API /api/plot */
 .figure-block {
   margin: 12px 0 4px;

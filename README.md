@@ -63,6 +63,14 @@ sur Vercel, branché sur l'API gratuite
   Un bouton lien 🔗 dédié ajoute une image **par URL** (barre inline).
   Envoi en **POST JSON** (tableau `images`) — repli GET automatique si l'API
   n'est pas encore à jour.
+- 📄 **Pièces jointes PDF** : jusqu'à **3 PDF** par message (bouton 📄). Le
+  texte du PDF est extrait **dans le navigateur** (pdf.js via jsDelivr, le
+  même CDN que KaTeX) puis **ajouté à la demande** envoyée à l'API : le chat
+  répond donc au sujet du document, **quel que soit le modèle** choisi. Le
+  PDF n'est jamais transmis tel quel (l'API n'accepte que texte + images), et
+  la logique existante (images/vision, figures, suites de conversation) reste
+  inchangée. Les PDF scannés (images) nécessitent un OCR et sont refusés avec
+  un message clair.
 - 🖼️ **Réponses multi-images** : l'API renvoie un tableau `images[]` — toutes
   les images sont affichées en grille cliquable (lightbox).
 - 📜 **Menu hamburger** (en haut à gauche) : bouton **Nouvelle conversation** +

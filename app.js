@@ -125,6 +125,7 @@ const store = {
   activeId: null,
   sending: false,
   attachments: [],      // {type:'data'|'url', name, value}
+  pdfs: [],             // AJOUT : PDF joints {name, text, pages} — texte extrait dans le navigateur
   mode: "chat",         // "chat" | "gen" (🎨 générer) | "edit" (🖼️ modifier)
   lastChatModel: null,  // dernier modèle de chat (restauré après une image)
 };
@@ -441,6 +442,8 @@ function renderMessage(m) {
     renderMath(bubble);
   }
   if (m.images && m.images.length) bubble.insertAdjacentHTML("beforeend", msgImagesGrid(m.images));
+  // AJOUT : PDF joints (affichés comme pièces jointes, sans image)
+  if (m.pdfs && m.pdfs.length) bubble.insertAdjacentHTML("beforeend", msgPdfsHtml(m.pdfs));
   if (m.figure && m.figure.svg) bubble.appendChild(buildFigureBlock(m.figure.svg, m.figure.title));
 
   const meta = el("div", "msg-meta");
@@ -1687,7 +1690,8 @@ async function sendMessage(text, attachments) {
   const empty = $("#emptyState");
 
   if (store.sending) return;
-  if (!text.trim() && (!attachments || !attachments.length)) return;
+  // AJOUT : un PDF joint seul suffit à envoyer (texte extrait plus bas).
+  if (!text.trim() && (!attachments || !attachments.length) && !(store.pdfs && store.pdfs.length)) return;
 
   // AJOUT : le mode image (🎨 générer / 🖼️ modifier) vient soit du modèle
   // choisi dans le sélecteur (« 🖼️ Images (ChatiPro) »), soit des boutons
@@ -1750,7 +1754,8 @@ async function sendMessage(text, attachments) {
       // reset=1 au premier message / quand on joint de nouvelles photos :
       // la mémoire serveur d'un autre sujet ne doit pas polluer la demande.
       const past = (!attachments || !attachments.length) ? lastUsableExchanges(conv) : [];
-      convCtx = { history: past, reset: firstMsg || (attachments && attachments.length > 0) };
+      // AJOUT : joindre un PDF = nouveau sujet (comme de nouvelles photos).
+      convCtx = { history: past, reset: firstMsg || (attachments && attachments.length > 0) || (store.pdfs && store.pdfs.length > 0) };
       if (!attachments || !attachments.length) {
         const cont = buildContinuationPrompt(conv, sendText);
         contNote = cont.kind === "follow" ? "🔁 suite de la conversation"
@@ -1771,6 +1776,16 @@ async function sendMessage(text, attachments) {
     sendText += figNote;
   }
 
+  // AJOUT — PDF joint : le texte extrait (dans le navigateur) est ajouté à la
+  // demande envoyée à l'API. Le PDF n'est jamais transmis tel quel : la
+  // logique texte + images de l'API reste donc inchangée.
+  if (store.pdfs && store.pdfs.length) {
+    if (!sendText) sendText = "Résume ce document.";
+    const pdf = buildPdfNote();
+    sendText += pdf.note;
+    if (pdf.truncated) toast("Texte du PDF tronqué pour tenir dans la limite de l'API.", "success");
+  }
+
   empty.style.display = "none";
 
   // AJOUT : pour le mode « 🖼️ modifier » (image-to-image), l'image source est
@@ -1781,6 +1796,7 @@ async function sendMessage(text, attachments) {
     role: "user",
     text: (imageMode === "gen" ? "🎨 " : imageMode === "edit" ? "🖼️ " : "") + text.trim(),
     images: (attachments || []).map((a) => a.value), // nouvelles photos seulement (affichage)
+    pdfs: (store.pdfs || []).map((d) => ({ name: d.name, pages: d.pages })), // AJOUT : PDF joints (affichage)
     model: imageMode === "gen" ? "🎨 ChatiPro"
       : imageMode === "edit" ? "🖌️ ChatiPro"
       : (toSend.length && !VISION_MODELS.has(currentModel()) ? visionModel() : currentModel()), // vision : modèle choisi s'il est compatible image, sinon repli vision
@@ -1799,6 +1815,7 @@ async function sendMessage(text, attachments) {
   input.value = "";
   autoResize(input);
   store.attachments = [];
+  store.pdfs = []; // AJOUT : le PDF a été injecté dans la demande → on vide la pièce jointe
   renderAttachmentTray();
   scrollToBottom();
 
@@ -2318,6 +2335,17 @@ function renderAttachmentTray() {
     chip.appendChild(rm);
     tray.appendChild(chip);
   });
+  // AJOUT : chips des PDF joints (texte déjà extrait — ce n'est pas une image)
+  (store.pdfs || []).forEach((d, i) => {
+    const chip = el("div", "attach-chip");
+    chip.appendChild(el("span", "", "📄"));
+    chip.appendChild(el("span", "ac-name", `${escapeHtml(d.name)} · ${d.pages} p.`));
+    const rm = el("button", "ac-remove", "✕");
+    rm.setAttribute("aria-label", "Retirer le PDF");
+    rm.onclick = () => { store.pdfs.splice(i, 1); renderAttachmentTray(); };
+    chip.appendChild(rm);
+    tray.appendChild(chip);
+  });
   // pilule « 📷 Exercice en mémoire » (photo renvoyée automatiquement)
   renderImageMemoryPill(getConversation(store.activeId));
   setComposerMode(store.mode); // maintient l'état des boutons image (edit nécessite une image)
@@ -2328,6 +2356,119 @@ function renderAttachmentTray() {
   }
   // le sélecteur de modèle VISION apparaît seulement quand une image est jointe
   $("#visionRow").hidden = store.attachments.length === 0;
+}
+
+/* ============================================================
+   AJOUT — Pièces jointes PDF
+   ------------------------------------------------------------
+   L'API de chat n'accepte que texte + images : le PDF n'est donc PAS
+   envoyé tel quel. Son texte est extrait DANS LE NAVIGATEUR (pdf.js via
+   jsDelivr — le même CDN que KaTeX) puis ajouté à la demande. Aucune
+   logique existante n'est modifiée, et ça marche quel que soit le
+   modèle/backend choisi (chat-free-gpt, UnlimitedAI, ChatiPro, Lumo).
+
+   ⚠️ Le prompt est plafonné à 4000 caractères côté API : le texte PDF
+   injecté est donc borné (PDF_MAX_CHARS) pour que la question ne soit
+   jamais coupée.
+   ============================================================ */
+const PDF_MAX_CHARS = 3200;   // budget du texte PDF injecté dans le prompt
+const MAX_PDFS = 3;           // nombre de PDF par message
+const PDFJS_SRC = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js";
+const PDFJS_WORKER = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+
+let pdfjsLoading = null;
+/** Charge pdf.js à la demande (une seule fois). */
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (pdfjsLoading) return pdfjsLoading;
+  pdfjsLoading = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = PDFJS_SRC;
+    s.onload = () => {
+      if (!window.pdfjsLib) { reject(new Error("pdf.js indisponible")); return; }
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = () => { pdfjsLoading = null; reject(new Error("Impossible de charger pdf.js (vérifiez la connexion).")); };
+    document.head.appendChild(s);
+  });
+  return pdfjsLoading;
+}
+
+/** Extrait le texte d'un fichier PDF (toutes les pages). */
+async function extractPdfText(file) {
+  const lib = await loadPdfJs();
+  const buf = await file.arrayBuffer();
+  const doc = await lib.getDocument({ data: new Uint8Array(buf) }).promise;
+  const parts = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const tc = await page.getTextContent();
+    const line = tc.items.map((it) => it.str).join(" ").replace(/\s+/g, " ").trim();
+    if (line) parts.push(line);
+  }
+  const pages = doc.numPages;
+  try { doc.destroy(); } catch (e) { /* noop */ }
+  return { pages, text: parts.join("\n").trim() };
+}
+
+/** Ajoute des fichiers PDF à la pièce jointe (extraction immédiate du texte). */
+async function addPdfFiles(files) {
+  for (const f of [...files]) {
+    if (!/application\/pdf/i.test(f.type) && !/\.pdf$/i.test(f.name)) {
+      toast(`« ${f.name} » ignoré — ce n'est pas un PDF.`, "error");
+      continue;
+    }
+    if (store.pdfs.length >= MAX_PDFS) {
+      toast(`Maximum ${MAX_PDFS} PDF par message.`, "error");
+      break;
+    }
+    toast(`📄 Extraction du texte de « ${f.name} »…`, "success");
+    try {
+      const { text, pages } = await extractPdfText(f);
+      if (!text) {
+        toast(`« ${f.name} » : aucun texte extractible (PDF scanné ? un OCR est nécessaire).`, "error");
+        continue;
+      }
+      store.pdfs.push({ name: f.name, text, pages });
+      toast(`📄 « ${f.name} » joint (${pages} page${pages > 1 ? "s" : ""}).`, "success");
+    } catch (e) {
+      toast(`Lecture de « ${f.name} » impossible : ${e.message}`, "error");
+    }
+  }
+  renderAttachmentTray();
+}
+
+/**
+ * Construit le bloc de contexte PDF ajouté au prompt.
+ * @returns {{note: string, truncated: boolean}}
+ */
+function buildPdfNote() {
+  if (!store.pdfs || !store.pdfs.length) return { note: "", truncated: false };
+  let budget = PDF_MAX_CHARS;
+  let truncated = false;
+  const blocks = [];
+  for (const d of store.pdfs) {
+    if (budget <= 0) { truncated = true; break; }
+    const t = d.text.slice(0, budget);
+    if (t.length < d.text.length) truncated = true;
+    budget -= t.length;
+    blocks.push(`— Document « ${d.name} » (${d.pages} page${d.pages > 1 ? "s" : ""}) :\n${t}`);
+  }
+  const note =
+    "\n\n(Contexte — document(s) PDF joint(s) par l'utilisateur ; réponds en te fondant " +
+    "sur leur contenu" +
+    (truncated ? ", le texte a été tronqué aux premiers caractères" : "") +
+    ".)\n" + blocks.join("\n\n");
+  return { note, truncated };
+}
+
+/** Rendu HTML des PDF dans la bulle utilisateur. */
+function msgPdfsHtml(pdfs) {
+  const chips = pdfs
+    .map((d) => `<span class="msg-pdf-chip">📄 ${escapeHtml(d.name)}${d.pages ? ` · ${d.pages} p.` : ""}</span>`)
+    .join("");
+  return `<div class="msg-pdfs">${chips}</div>`;
 }
 
 /* ---------- Sidebar ---------- */
@@ -2588,6 +2729,17 @@ function init() {
   });
   $("#fileInput").addEventListener("change", (e) => {
     addFiles(e.target.files);
+    e.target.value = "";
+  });
+
+  // AJOUT — pièces jointes PDF (bouton 📄). Le PDF est accepté, son texte est
+  // extrait dans le navigateur puis ajouté à la demande (voir addPdfFiles).
+  $("#pdfBtn").addEventListener("click", () => {
+    try { $("#pdfInput").click(); }
+    catch (err) { toast("📄 Sélecteur de fichiers bloqué par ce navigateur.", "error"); }
+  });
+  $("#pdfInput").addEventListener("change", (e) => {
+    addPdfFiles(e.target.files);
     e.target.value = "";
   });
 
