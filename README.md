@@ -34,16 +34,25 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
 
 ## ✨ Fonctionnalités
 
-- 🎙️ **Mode vocal** : bouton **🎤** dans la barre de saisie — on parle, le site
-  transcrit (reconnaissance vocale du navigateur, **fr-FR**, sans service tiers
-  payant) puis **envoie automatiquement** le message : conversation mains libres.
-  Bouton **🔊** : la réponse du bot est **lue à voix haute** (synthèse Microsoft
-  Edge via la route `/api/tts` de `chat-free-gpt` — **gratuite, sans clé**) ; la
-  préférence est mémorisée. Un petit **🔊** sur chaque réponse du bot permet de
-  la réécouter. Le texte lu est nettoyé (code, LaTeX, markdown, emojis, URL
+- 🎙️ **Mode vocal — discussion « voix à voix »** : un seul bouton, **🎧**, dans
+  la barre de saisie, et on ne touche plus à rien :
+  **on parle → le message part tout seul → le bot répond à voix haute → le micro
+  se rouvre tout seul → on reparle…** C'est une vraie conversation mains libres.
+  Le micro **ne se rouvre jamais pendant que le bot parle** (aucun écho : le site
+  attend la fin de la lecture, que la réponse soit affichée, et qu'aucun envoi
+  ne soit en cours ; garde-fou de 90 s). Il faut juste le micro du navigateur —
+  aucune saisie de texte, aucun clavier.
+  Les deux boutons séparés restent disponibles : **🎤** dicter un seul message,
+  **🔊** lire les réponses à voix haute. Un petit **🔊** sur chaque réponse du bot
+  permet de la réécouter.
+  La dictée utilise la reconnaissance vocale du navigateur (**fr-FR**), la voix
+  est la synthèse Microsoft Edge via `/api/tts` de `chat-free-gpt` (**gratuite,
+  sans clé**). Le texte lu est nettoyé (code, LaTeX, markdown, emojis, URL
   retirés) et coupé proprement à la dernière phrase (700 caractères).
-  Les deux boutons sont **additifs** : le chat, les figures et les pièces
-  jointes ne sont pas modifiés.
+  Le mode vocal s'arrête en recliquant **🎧** (ou **🎤**), en coupant **🔊**, ou
+  automatiquement si l'onglet passe en arrière-plan ou après 6 silences.
+  Tous ces ajouts sont **additifs** : le chat, les figures et les pièces jointes
+  ne sont pas modifiés.
 - 🎨 **UI premium & dynamique** : thème sombre, glassmorphism, fond animé
   (orbs aurora + particules), animations fluides, responsive mobile.
 - 🤖 **Menu déroulant multi-modèles** placé **sous la zone de saisie** :
@@ -230,8 +239,14 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
 - ✅ Figures : `GET /api/plot?expression=x-2ln(x)` (courbe) et
   `GET /api/plot?subject=circuit+électrique…` (schéma IA) → `{ svg }`
 - ✅ Détection figures : `node test-figures.js` (31 tests)
-- ✅ **Mode vocal** (2026-09-28, Chrome headless) : boutons 🎤/🔊 présents ;
+- ✅ **Mode vocal** (2026-09-28, Chrome headless) : boutons 🎤/🔊/🎧 présents ;
   bascule 🔊 mémorisée dans `localStorage` ; **appel réel** à
   `https://chat-free-gpt.vercel.app/api/tts` → 200, ~31 Ko de MP3 en ~2 s ;
   bouton « réécouter » rendu sur les réponses ; nettoyage du texte vérifié ;
   **aucune erreur JS**. Le composer existant (📎 🔗 📄 🎨 ➤) est intact.
+- ✅ **Discussion vocale mains libres 🎧** (reconnaissance vocale simulée pour
+  rendre le tour déterministe) : activation → micro ouvert ; parole → envoi
+  automatique à la vraie API ; réponse affichée ; voix générée puis jouée ;
+  **micro rouvert seulement après la fin de la lecture** (vérifié explicitement :
+  aucune réouverture pendant que le bot parle → pas d'écho) ; arrêt par 🎤 et par
+  coupure du 🔊 ; plus aucune réouverture après l'arrêt. **9/9**.

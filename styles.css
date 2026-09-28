@@ -1100,3 +1100,15 @@ body {
 }
 .msg-meta .msg-say:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.12); }
 .msg-meta .msg-say:active { transform: scale(0.92); }
+
+/* Bouton 🎧 « discussion vocale mains libres » (actif) */
+#voiceLoopBtn.active {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.16);
+  border-color: rgba(74, 222, 128, 0.45);
+  animation: voice-loop-glow 1.6s ease-in-out infinite;
+}
+@keyframes voice-loop-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.4); }
+  50%      { box-shadow: 0 0 0 7px rgba(74, 222, 128, 0); }
+}

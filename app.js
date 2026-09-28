@@ -2942,6 +2942,12 @@ const VOICE_ERROR_COOLDOWN = 12000;       // anti-spam des messages d'erreur
 const voiceState = {
   enabled: false, listening: false, voice: VOICE_NAME,
   audio: null, url: null, unlocked: false, lastErrorAt: 0,
+  // AJOUT — discussion vocale mains libres (🎧)
+  // `turn` décrit le tour en cours : { at, from } — `from` = nombre de réponses
+  // déjà affichées quand la question a été envoyée. Le minuteur attend qu'une
+  // nouvelle réponse apparaisse (et que la lecture vocale soit finie) avant de
+  // rouvrir le micro : c'est ce qui évite d'écouter le bot se répondre à lui-même.
+  autoLoop: false, turn: null, since: 0, silentTurns: 0,
 };
 
 /* Ne lit que du texte naturel : ni code, ni LaTeX, ni markdown, ni emoji. */
@@ -2981,6 +2987,7 @@ function voiceRelease() {
   if (voiceState.url) { try { URL.revokeObjectURL(voiceState.url); } catch (e) { /* noop */ } }
   voiceState.audio = null;
   voiceState.url = null;
+  voiceState.since = Date.now();      // AJOUT : base du réarmement du micro
   const btn = $("#voiceOutBtn");
   if (btn) btn.classList.remove("speaking");
 }
@@ -3050,7 +3057,13 @@ function voiceUnlock() {
 function voiceInit() {
   const micBtn = $("#micBtn");
   const outBtn = $("#voiceOutBtn");
+  const loopBtn = $("#voiceLoopBtn"); // AJOUT : discussion vocale mains libres
   if (!micBtn || !outBtn) return; // HTML non mis à jour → on ne fait rien
+
+  // AJOUT — discussion vocale (🎧) : ces deux fonctions sont définies plus bas,
+  // après la vérification du support de la reconnaissance vocale.
+  let loopStart = null;
+  let loopStop = null;
 
   /* --- 🔊 Réponse vocale (préférence mémorisée) --- */
   try {
@@ -3068,10 +3081,27 @@ function voiceInit() {
   };
   renderOutBtn();
 
+  /* AJOUT — état du bouton 🎧 (discussion vocale mains libres). */
+  const renderLoopBtn = () => {
+    if (!loopBtn) return;
+    loopBtn.classList.toggle("active", voiceState.autoLoop);
+    loopBtn.setAttribute("aria-pressed", voiceState.autoLoop ? "true" : "false");
+    loopBtn.title = voiceState.autoLoop
+      ? "🎧 Discussion vocale en cours — cliquez pour arrêter"
+      : "🎧 Discussion vocale : parlez, écoutez la réponse, et reparlez — sans toucher l'écran";
+  };
+  renderLoopBtn();
+
   outBtn.addEventListener("click", () => {
     voiceState.enabled = !voiceState.enabled;
     try { localStorage.setItem(VOICE_OUT_KEY, voiceState.enabled ? "1" : "0"); } catch (e) { /* noop */ }
     renderOutBtn();
+    // AJOUT : couper le son pendant une discussion vocale revient à arrêter
+    // la discussion (sinon la boucle continuerait sans réponse audible).
+    if (!voiceState.enabled && voiceState.autoLoop && loopStop) {
+      loopStop("🎧 Discussion vocale arrêtée (réponses muettes).", "success");
+      return;
+    }
     toast(voiceState.enabled ? "🔊 Réponse vocale activée." : "🔇 Réponse vocale désactivée.", "success");
   });
 
@@ -3079,7 +3109,8 @@ function voiceInit() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const inputEl = $("#input");
   if (!SR || !inputEl) {
-    micBtn.hidden = true; // navigateur sans reconnaissance vocale → bouton masqué
+    micBtn.hidden = true;            // pas de reconnaissance vocale → bouton masqué
+    if (loopBtn) loopBtn.hidden = true;
     return;
   }
 
@@ -3097,8 +3128,56 @@ function voiceInit() {
     micBtn.classList.toggle("recording", on);
     micBtn.setAttribute("aria-pressed", on ? "true" : "false");
     if (on) { phBefore = inputEl.placeholder; inputEl.placeholder = "🎙️ Parlez, je vous écoute…"; }
-    else if (phBefore) { inputEl.placeholder = phBefore; }
+    else {
+      if (phBefore) inputEl.placeholder = phBefore;
+      voiceState.since = Date.now(); // AJOUT : départ du délai de réarmement
+    }
   };
+
+  /* AJOUT — nombre de réponses déjà affichées : sert à savoir si le tour en
+     cours est terminé. On compte les bulles avec `.msg-meta` (l'indicateur de
+     frappe, qui est aussi une bulle assistant, n'en a pas). */
+  const assistantDone = () =>
+    document.querySelectorAll("#chatArea .msg.assistant .msg-meta").length;
+
+  /* AJOUT — ouvre le micro (utilisé par la dictée simple ET par la boucle 🎧). */
+  const listenStart = () => {
+    if (voiceState.listening) return;
+    finalText = "";
+    try { rec.start(); } catch (e) { /* déjà en cours */ }
+  };
+
+  /* AJOUT — 🎧 entre en discussion vocale mains libres. */
+  loopStart = () => {
+    voiceState.autoLoop = true;
+    voiceState.silentTurns = 0;
+    if (!voiceState.enabled) {
+      voiceState.enabled = true; // la discussion vocale implique d'entendre la réponse
+      try { localStorage.setItem(VOICE_OUT_KEY, "1"); } catch (e) { /* noop */ }
+      renderOutBtn();
+    }
+    renderLoopBtn();
+    toast("🎧 Discussion vocale activée — parlez, je vous réponds à voix haute.", "success");
+    listenStart();
+  };
+
+  /* AJOUT — 🎧 sort de la discussion vocale. */
+  loopStop = (message, type) => {
+    voiceState.autoLoop = false;
+    voiceState.silentTurns = 0;
+    renderLoopBtn();
+    if (voiceState.listening) { try { rec.stop(); } catch (e) { /* noop */ } }
+    voiceStop();
+    if (message) toast(message, type || "error");
+  };
+
+  if (loopBtn) {
+    loopBtn.addEventListener("click", () => {
+      voiceUnlock();
+      if (voiceState.autoLoop) loopStop("🎧 Discussion vocale arrêtée.", "success");
+      else loopStart();
+    });
+  }
 
   rec.onstart = () => {
     voiceStop();      // ne pas retranscrire la voix du bot
@@ -3115,6 +3194,9 @@ function voiceInit() {
   };
   rec.onerror = (e) => {
     const code = (e && e.error) || "inconnu";
+    // En discussion vocale, un silence n'est PAS une erreur : la boucle
+    // réarmera le micro toute seule (voir le minuteur plus bas).
+    if (voiceState.autoLoop && code === "no-speech") return;
     const msg =
       code === "not-allowed" || code === "service-not-allowed"
         ? "🎙️ Micro refusé — autorisez le microphone dans le navigateur."
@@ -3122,25 +3204,72 @@ function voiceInit() {
         : code === "network" ? "🎙️ Reconnaissance vocale indisponible (réseau)."
         : "🎙️ Dictée impossible (" + code + ").";
     toast(msg, "error");
+    // Erreurs bloquantes : on arrête la boucle pour ne pas tourner à vide.
+    if (voiceState.autoLoop && ["not-allowed", "service-not-allowed", "network", "audio-capture"].indexOf(code) !== -1 && loopStop) {
+      loopStop("🎧 Discussion vocale arrêtée (micro indisponible).");
+    }
   };
   rec.onend = () => {
     setListening(false);
     const text = (finalText || inputEl.value || "").trim();
     finalText = "";
-    if (!text) return;
+    if (!text) {
+      // Silence : hors boucle on ne fait rien ; en discussion vocale le
+      // minuteur réarme le micro (et on abandonne après 6 silences d'affilée).
+      voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
+      if (voiceState.autoLoop && voiceState.silentTurns >= 6 && loopStop) {
+        loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
+      }
+      return;
+    }
+    voiceState.silentTurns = 0;
     inputEl.value = text;
     autoResize(inputEl);
     // Envoi automatique : c'est le principe de la conversation vocale.
+    // On marque le tour AVANT d'envoyer (sendMessage pose `store.sending` un
+    // peu plus loin, après un await) : le micro ne peut donc pas se rouvrir
+    // pendant que la question est en cours de traitement.
+    voiceState.turn = store.sending ? null : { at: Date.now(), from: assistantDone() };
     sendMessage(text, [...store.attachments]);
   };
 
   micBtn.addEventListener("click", () => {
     voiceUnlock();
+    // En discussion vocale, 🎤 sert de bouton d'arrêt.
+    if (voiceState.autoLoop) { if (loopStop) loopStop("🎧 Discussion vocale arrêtée.", "success"); return; }
     if (voiceState.listening) { try { rec.stop(); } catch (e) { /* noop */ } return; }
     finalText = "";
     inputEl.value = "";
     autoResize(inputEl);
-    try { rec.start(); } catch (e) { /* déjà en cours */ }
+    listenStart();
+  });
+
+  /* AJOUT — minuteur de réarmement : c'est ce qui rend la discussion vraiment
+     mains libres. Il ne rouvre le micro que lorsque TOUT est fini :
+       1. une nouvelle réponse est affichée (tour terminé) ;
+       2. le bot a fini de parler (aucun audio en cours) ;
+       3. plus rien n'est en cours d'envoi.
+     Sinon on attends — d'où l'absence d'écho. Garde-fou à 90 s pour ne jamais
+     rester bloqué (réseau lent, erreur…). */
+  setInterval(() => {
+    if (!voiceState.autoLoop || voiceState.listening) return;
+    if (voiceState.audio) return;                       // le bot parle → on attend
+    if (voiceState.turn) {
+      const replied = assistantDone() > voiceState.turn.from;
+      const stalled = Date.now() - voiceState.turn.at > 90000;
+      if (!replied && !stalled) return;                 // tour encore en cours
+      voiceState.turn = null;
+    }
+    if (store.sending) return;
+    if (Date.now() - (voiceState.since || 0) < 400) return;
+    listenStart();
+  }, 700);
+
+  // Sécurité : on ne laisse pas le micro ouvert quand l'onglet passe en fond.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && voiceState.autoLoop && loopStop) {
+      loopStop("🎧 Discussion vocale en pause (onglet en arrière-plan).", "success");
+    }
   });
 
   document.addEventListener("click", voiceUnlock, { once: true });
