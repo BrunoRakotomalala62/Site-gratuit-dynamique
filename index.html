@@ -111,6 +111,10 @@
       </button>
       <input type="file" id="fileInput" accept="image/*" multiple class="sr-only" />
 
+      <!-- AJOUT : pièce jointe PDF (texte extrait dans le navigateur) -->
+      <button id="pdfBtn" class="icon-btn" aria-label="Joindre un PDF" title="Joindre un PDF (max 3) — le texte du document est lu par le chat">📄</button>
+      <input type="file" id="pdfInput" accept="application/pdf,.pdf" multiple class="sr-only" />
+
       <!-- AJOUT : modes image ChatiPro (génération / image-to-image) -->
       <button id="genBtn" class="icon-btn" aria-label="Générer une image" title="🎨 Générer une image">🎨</button>
       <button id="editImgBtn" class="icon-btn" aria-label="Modifier l'image jointe" title="🖼️ Modifier l'image jointe" hidden>🖌️</button>
@@ -182,6 +186,6 @@
   </div>
 </div>
 
-<script src="app.js?v=39"></script>
+<script src="app.js?v=41"></script>
 </body>
 </html>
