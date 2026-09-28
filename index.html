@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=18" />
+<link rel="stylesheet" href="styles.css?v=19" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>" />
 </head>
 <body>
@@ -102,33 +102,11 @@
       <button id="urlAdd" class="url-add">Ajouter</button>
     </div>
     <div class="composer glass">
-      <label id="attachBtn" class="icon-btn" for="fileInput" role="button" tabindex="0" aria-label="Joindre des images" title="Joindre des images (max 4)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-      </label>
-
-      <button id="urlBtn" class="icon-btn" aria-label="Ajouter une image par URL" title="Ajouter une image par URL">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-      </button>
-      <input type="file" id="fileInput" accept="image/*" multiple class="sr-only" />
-
-      <!-- AJOUT : pièce jointe PDF (texte extrait dans le navigateur) -->
-      <button id="pdfBtn" class="icon-btn" aria-label="Joindre un PDF" title="Joindre un PDF (max 3) — le texte du document est lu par le chat">📄</button>
-      <input type="file" id="pdfInput" accept="application/pdf,.pdf" multiple class="sr-only" />
-
-      <!-- AJOUT : modes image ChatiPro (génération / image-to-image) -->
-      <button id="genBtn" class="icon-btn" aria-label="Générer une image" title="🎨 Générer une image">🎨</button>
-      <button id="editImgBtn" class="icon-btn" aria-label="Modifier l'image jointe" title="🖼️ Modifier l'image jointe" hidden>🖌️</button>
-
-      <!-- AJOUT : mode vocal — dictée 🎤 + réponse à voix haute 🔊 -->
-      <button id="micBtn" class="icon-btn" aria-label="Dicter un message" title="🎙️ Dicter un message — le texte reconnu est envoyé automatiquement" aria-pressed="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3M8 22h8"/></svg>
-      </button>
-      <button id="voiceOutBtn" class="icon-btn" aria-label="Activer la réponse vocale" title="🔊 Réponse vocale : lire les réponses à voix haute" aria-pressed="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>
-      </button>
-      <!-- AJOUT : discussion vocale mains libres (parler → réponse vocale → parler) -->
-      <button id="voiceLoopBtn" class="icon-btn" aria-label="Discussion vocale mains libres" title="🎧 Discussion vocale : parlez, écoutez la réponse, et reparlez — sans toucher l'écran" aria-pressed="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 14v3a2 2 0 0 1-2 2h-1a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3z"/><path d="M3 14v3a2 2 0 0 0 2 2h1a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H3z"/></svg>
+      <!-- AJOUT : menu déroulant « ＋ ». Toutes les actions sont regroupées ici
+           pour laisser TOUTE la largeur au champ de saisie (avant, 6 boutons
+           s'entassaient à côté du champ, qui devenait minuscule sur mobile). -->
+      <button id="moreBtn" class="icon-btn more-btn" type="button" aria-label="Plus d'options" aria-haspopup="true" aria-expanded="false" title="Plus d'options — pièces jointes, images, voix">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
       </button>
 
       <textarea id="input" class="input" rows="1" placeholder="Écrivez votre message… (Entrée = envoyer, Maj+Entrée = saut de ligne)"></textarea>
@@ -136,6 +114,29 @@
       <button id="sendBtn" class="send-btn" aria-label="Envoyer le message">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
       </button>
+    </div>
+
+    <!-- AJOUT : panneau du menu « ＋ » — mêmes boutons qu'avant, simplement
+         regroupés et étiquetés (les identifiants sont inchangés : la logique
+         existante continue de fonctionner telle quelle). -->
+    <div id="morePanel" class="more-panel glass" hidden role="menu" aria-label="Options du message">
+      <div class="more-title">📎 Joindre</div>
+      <label id="attachBtn" class="more-item" for="fileInput" role="button" tabindex="0" aria-label="Joindre des images" title="Joindre des images (max 4)">
+        <span class="more-ico">🖼️</span><span class="more-txt">Images <em>max 4</em></span>
+      </label>
+      <input type="file" id="fileInput" accept="image/*" multiple class="sr-only" />
+      <button id="urlBtn" class="more-item" type="button"><span class="more-ico">🔗</span><span class="more-txt">Image par URL</span></button>
+      <button id="pdfBtn" class="more-item" type="button" title="Le texte du document est lu par le chat"><span class="more-ico">📄</span><span class="more-txt">Document PDF <em>max 3</em></span></button>
+      <input type="file" id="pdfInput" accept="application/pdf,.pdf" multiple class="sr-only" />
+
+      <div class="more-title">🎨 Images</div>
+      <button id="genBtn" class="more-item" type="button" aria-label="Générer une image"><span class="more-ico">🎨</span><span class="more-txt">Générer une image</span></button>
+      <button id="editImgBtn" class="more-item" type="button" aria-label="Modifier l'image jointe" hidden><span class="more-ico">🖌️</span><span class="more-txt">Modifier l'image jointe</span></button>
+
+      <div class="more-title">🎙️ Voix</div>
+      <button id="micBtn" class="more-item" type="button" aria-label="Dicter un message" aria-pressed="false"><span class="more-ico">🎤</span><span class="more-txt">Dicter un message</span></button>
+      <button id="voiceOutBtn" class="more-item more-keep" type="button" aria-label="Activer la réponse vocale" aria-pressed="false"><span class="more-ico">🔊</span><span class="more-txt">Réponse vocale</span></button>
+      <button id="voiceLoopBtn" class="more-item more-keep" type="button" aria-label="Discussion vocale mains libres" aria-pressed="false"><span class="more-ico">🎧</span><span class="more-txt">Discussion vocale <em>mains libres</em></span></button>
     </div>
 
     <!-- Sélecteur de modèle : sous la saisie -->
@@ -198,6 +199,6 @@
   </div>
 </div>
 
-<script src="app.js?v=43"></script>
+<script src="app.js?v=44"></script>
 </body>
 </html>
