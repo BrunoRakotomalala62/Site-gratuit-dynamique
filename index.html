@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-<link rel="stylesheet" href="styles.css?v=16" />
+<link rel="stylesheet" href="styles.css?v=17" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>" />
 </head>
 <body>
@@ -119,6 +119,14 @@
       <button id="genBtn" class="icon-btn" aria-label="Générer une image" title="🎨 Générer une image">🎨</button>
       <button id="editImgBtn" class="icon-btn" aria-label="Modifier l'image jointe" title="🖼️ Modifier l'image jointe" hidden>🖌️</button>
 
+      <!-- AJOUT : mode vocal — dictée 🎤 + réponse à voix haute 🔊 -->
+      <button id="micBtn" class="icon-btn" aria-label="Dicter un message" title="🎙️ Dicter un message — le texte reconnu est envoyé automatiquement" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3M8 22h8"/></svg>
+      </button>
+      <button id="voiceOutBtn" class="icon-btn" aria-label="Activer la réponse vocale" title="🔊 Réponse vocale : lire les réponses à voix haute" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>
+      </button>
+
       <textarea id="input" class="input" rows="1" placeholder="Écrivez votre message… (Entrée = envoyer, Maj+Entrée = saut de ligne)"></textarea>
 
       <button id="sendBtn" class="send-btn" aria-label="Envoyer le message">
@@ -186,6 +194,6 @@
   </div>
 </div>
 
-<script src="app.js?v=41"></script>
+<script src="app.js?v=42"></script>
 </body>
 </html>
