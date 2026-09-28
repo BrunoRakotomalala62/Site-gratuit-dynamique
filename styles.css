@@ -1059,3 +1059,44 @@ body {
 }
 .confirm-ok:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(239, 68, 68, 0.45); }
 .confirm-ok:active { transform: translateY(0); }
+
+/* ============================================================
+   AJOUT — Mode vocal (dicter 🎤 / écouter 🔊)
+   Styles purement additifs : n'altèrent aucune règle existante.
+   ============================================================ */
+
+/* Bouton micro en cours d'écoute */
+.icon-btn.recording {
+  color: #ff6b7d;
+  background: rgba(255, 93, 108, 0.16);
+  border-color: rgba(255, 93, 108, 0.45);
+  animation: voice-pulse 1.3s ease-out infinite;
+}
+@keyframes voice-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 93, 108, 0.45); }
+  70%  { box-shadow: 0 0 0 10px rgba(255, 93, 108, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 93, 108, 0); }
+}
+
+/* Bouton haut-parleur pendant une lecture */
+.icon-btn.speaking { animation: voice-glow 1.4s ease-in-out infinite; }
+@keyframes voice-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0.35); }
+  50%      { box-shadow: 0 0 0 6px rgba(167, 139, 250, 0); }
+}
+
+/* Bouton « réécouter » dans les métadonnées d'un message du bot */
+.msg-meta .msg-say {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 99px;
+  transition: color .15s, background .15s, transform .08s;
+}
+.msg-meta .msg-say:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.12); }
+.msg-meta .msg-say:active { transform: scale(0.92); }

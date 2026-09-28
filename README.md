@@ -34,6 +34,16 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
 
 ## ✨ Fonctionnalités
 
+- 🎙️ **Mode vocal** : bouton **🎤** dans la barre de saisie — on parle, le site
+  transcrit (reconnaissance vocale du navigateur, **fr-FR**, sans service tiers
+  payant) puis **envoie automatiquement** le message : conversation mains libres.
+  Bouton **🔊** : la réponse du bot est **lue à voix haute** (synthèse Microsoft
+  Edge via la route `/api/tts` de `chat-free-gpt` — **gratuite, sans clé**) ; la
+  préférence est mémorisée. Un petit **🔊** sur chaque réponse du bot permet de
+  la réécouter. Le texte lu est nettoyé (code, LaTeX, markdown, emojis, URL
+  retirés) et coupé proprement à la dernière phrase (700 caractères).
+  Les deux boutons sont **additifs** : le chat, les figures et les pièces
+  jointes ne sont pas modifiés.
 - 🎨 **UI premium & dynamique** : thème sombre, glassmorphism, fond animé
   (orbs aurora + particules), animations fluides, responsive mobile.
 - 🤖 **Menu déroulant multi-modèles** placé **sous la zone de saisie** :
@@ -204,7 +214,7 @@ Réponse : `{ success, reply, model, uid, images?, conversationId, source }`.
 ```
 index.html      → interface (hamburger, composer, lightbox…, chip « Trace une courbe »)
 styles.css      → thème premium (glassmorphism, animations, responsive, bloc figure)
-app.js          → logique (API, modèles, historique, pièces jointes, markdown, figures)
+app.js          → logique (API, modèles, historique, pièces jointes, markdown, figures, mode vocal)
 test-figures.js → tests unitaires de la détection des figures (node test-figures.js)
 vercel.json     → configuration Vercel (headers + cleanUrls)
 ```
@@ -220,3 +230,8 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
 - ✅ Figures : `GET /api/plot?expression=x-2ln(x)` (courbe) et
   `GET /api/plot?subject=circuit+électrique…` (schéma IA) → `{ svg }`
 - ✅ Détection figures : `node test-figures.js` (31 tests)
+- ✅ **Mode vocal** (2026-09-28, Chrome headless) : boutons 🎤/🔊 présents ;
+  bascule 🔊 mémorisée dans `localStorage` ; **appel réel** à
+  `https://chat-free-gpt.vercel.app/api/tts` → 200, ~31 Ko de MP3 en ~2 s ;
+  bouton « réécouter » rendu sur les réponses ; nettoyage du texte vérifié ;
+  **aucune erreur JS**. Le composer existant (📎 🔗 📄 🎨 ➤) est intact.

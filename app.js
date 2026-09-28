@@ -453,6 +453,16 @@ function renderMessage(m) {
   if (m.note) meta.appendChild(el("span", "m-note", m.note));
   if (m.completed) meta.appendChild(el("span", "m-note", "✂️ réponse complétée"));
   if (m.images && m.images.length) meta.appendChild(el("span", "m-vision", "🖼️ vision"));
+  // AJOUT — mode vocal : bouton « réécouter » sur les réponses du bot.
+  // Purement additif : n'affecte ni le rendu ni la logique des messages.
+  if (role === "assistant" && m.text && !m.error) {
+    const sayBtn = el("button", "msg-say", "🔊");
+    sayBtn.type = "button";
+    sayBtn.title = "Lire cette réponse à voix haute";
+    sayBtn.setAttribute("aria-label", "Lire cette réponse à voix haute");
+    sayBtn.onclick = (e) => { e.stopPropagation(); voiceSpeak(m.text); };
+    meta.appendChild(sayBtn);
+  }
   bubble.appendChild(meta);
 
   msg.appendChild(bubble);
@@ -1896,6 +1906,8 @@ async function sendMessage(text, attachments) {
         conv.messages.push(reply);
         const replyEl = renderMessage(reply);
         chatArea.appendChild(replyEl);
+        // AJOUT — mode vocal : lire la réponse à voix haute si activé (🔊).
+        maybeSpeakReply(reply);
         // Figures : si la demande contient une consigne de dessin (courbe,
         // schéma…) — y compris dans une photo d'exercice — on construit la
         // figure et on l'affiche à la fin de la réponse du bot.
@@ -2906,6 +2918,236 @@ window.addEventListener("error", (e) => {
     toast("⚠️ Erreur technique : " + (e.message || "inconnue"), "error");
   } catch (err) { /* noop */ }
 });
+
+/* ============================================================
+   AJOUT — Mode vocal : dicter 🎤 et écouter 🔊
+   ------------------------------------------------------------
+   Bloc entièrement ADDITIF : la logique existante n'est touchée
+   que par deux appels marqués « AJOUT » (un dans sendMessage, un
+   dans renderMessage). Rien n'est réécrit.
+
+   • 🎤 Dictée  : reconnaissance vocale du navigateur (Web Speech
+                  API, fr-FR). Le texte reconnu est envoyé
+                  automatiquement → conversation mains libres.
+   • 🔊 Réponse  : la réponse du bot est lue à voix haute par la
+                  route /api/tts de l'API chat-free-gpt (synthèse
+                  Edge — gratuite, sans clé).
+   ============================================================ */
+const VOICE_OUT_KEY = "lumina.voice.out.v1";
+const VOICE_NAME_KEY = "lumina.voice.name.v1";
+const VOICE_NAME = "fr-FR-DeniseNeural";  // voix par défaut (voir /api/voices)
+const VOICE_MAX_CHARS = 700;              // longueur lue (coupée à la phrase)
+const VOICE_ERROR_COOLDOWN = 12000;       // anti-spam des messages d'erreur
+
+const voiceState = {
+  enabled: false, listening: false, voice: VOICE_NAME,
+  audio: null, url: null, unlocked: false, lastErrorAt: 0,
+};
+
+/* Ne lit que du texte naturel : ni code, ni LaTeX, ni markdown, ni emoji. */
+function voiceCleanText(raw) {
+  let s = String(raw == null ? "" : raw);
+  s = s.replace(/```[\s\S]*?```/g, " ");            // blocs de code
+  s = s.replace(/`([^`]*)`/g, "$1");                // code en ligne
+  s = s.replace(/\$\$[\s\S]*?\$\$/g, " ");          // LaTeX bloc $$…$$
+  s = s.replace(/\\\[[\s\S]*?\\\]/g, " ");          // \[…\]
+  s = s.replace(/\\\([\s\S]*?\\\)/g, " ");          // \(…\)
+  s = s.replace(/\$[^$\n]*\$/g, " ");               // LaTeX en ligne $…$
+  s = s.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1"); // liens et images
+  s = s.replace(/https?:\/\/\S+/g, " ");
+  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, "");         // titres
+  s = s.replace(/^\s{0,3}>\s?/gm, "");              // citations
+  s = s.replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "");   // listes
+  s = s.replace(/^\s*\|.*\|\s*$/gm, " ");           // lignes de tableau
+  s = s.replace(/^\s*[-:|\s]{3,}\s*$/gm, " ");      // séparateurs de tableau
+  s = s.replace(/[*_~]{1,3}/g, "");                 // emphase markdown
+  s = s.replace(/&nbsp;/g, " ");
+  s = s.replace(/[\p{Extended_Pictographic}\uFE0F\u{1F3FB}-\u{1F3FF}]/gu, " "); // emojis
+  s = s.replace(/[{}\[\]#]+/g, " ");
+  s = s.replace(/\s+/g, " ").trim();
+  // Les mots répétés à la suite (« et et et ») viennent des fragments retirés
+  // (formule, code, lien) : on les fusionne pour une lecture naturelle.
+  s = s.replace(/\b([\p{L}]{2,})(\s+\1\b)+/giu, "$1");
+  if (!s) return "";
+  if (s.length > VOICE_MAX_CHARS) {
+    const cut = s.slice(0, VOICE_MAX_CHARS);
+    const m = cut.match(/^[\s\S]*[.!?…](?=\s|$)/);  // coupe à la dernière phrase
+    s = (m ? m[0] : cut).trim() + " …";
+  }
+  return s;
+}
+
+function voiceRelease() {
+  if (voiceState.url) { try { URL.revokeObjectURL(voiceState.url); } catch (e) { /* noop */ } }
+  voiceState.audio = null;
+  voiceState.url = null;
+  const btn = $("#voiceOutBtn");
+  if (btn) btn.classList.remove("speaking");
+}
+
+function voiceStop() {
+  if (voiceState.audio) { try { voiceState.audio.pause(); } catch (e) { /* noop */ } }
+  voiceRelease();
+}
+
+/* Lit un texte à voix haute via /api/tts (synthèse Edge, sans clé). */
+async function voiceSpeak(text, opts) {
+  const options = opts || {};
+  const clean = voiceCleanText(text);
+  if (!clean) return;
+  voiceStop();
+  const btn = $("#voiceOutBtn");
+  try {
+    const res = await fetch(`${API_BASE}/api/tts?format=json`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: clean, voice: voiceState.voice || VOICE_NAME }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.success || !data.audio) {
+      throw new Error((data && data.error) || `HTTP ${res.status}`);
+    }
+    const bin = atob(data.audio);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: data.mimeType || "audio/mpeg" }));
+    const audio = new Audio(url);
+    audio.setAttribute("playsinline", ""); // mobile : pas de lecteur plein écran
+    voiceState.audio = audio;
+    voiceState.url = url;
+    if (btn) btn.classList.add("speaking");
+    audio.onended = () => voiceRelease();
+    audio.onerror = () => voiceRelease();
+    await audio.play();
+  } catch (err) {
+    voiceRelease();
+    const now = Date.now();
+    if (!options.silent && now - voiceState.lastErrorAt > VOICE_ERROR_COOLDOWN) {
+      voiceState.lastErrorAt = now;
+      toast("🔊 Lecture vocale indisponible : " + (err && err.message ? err.message : err), "error");
+    }
+  }
+}
+
+/* Appelé par sendMessage : lit la réponse uniquement si 🔊 est activé. */
+function maybeSpeakReply(msg) {
+  if (!voiceState.enabled) return;
+  if (!msg || msg.error || !msg.text) return;
+  voiceSpeak(msg.text);
+}
+
+/* Débloque la lecture audio au premier geste (politique des navigateurs mobiles). */
+function voiceUnlock() {
+  if (voiceState.unlocked) return;
+  voiceState.unlocked = true;
+  try {
+    const a = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
+    a.volume = 0;
+    a.play().catch(() => {});
+  } catch (e) { /* noop */ }
+}
+
+function voiceInit() {
+  const micBtn = $("#micBtn");
+  const outBtn = $("#voiceOutBtn");
+  if (!micBtn || !outBtn) return; // HTML non mis à jour → on ne fait rien
+
+  /* --- 🔊 Réponse vocale (préférence mémorisée) --- */
+  try {
+    voiceState.enabled = localStorage.getItem(VOICE_OUT_KEY) === "1";
+    voiceState.voice = localStorage.getItem(VOICE_NAME_KEY) || VOICE_NAME;
+  } catch (e) { /* noop */ }
+
+  const renderOutBtn = () => {
+    outBtn.classList.toggle("active", voiceState.enabled);
+    outBtn.setAttribute("aria-pressed", voiceState.enabled ? "true" : "false");
+    outBtn.title = voiceState.enabled
+      ? "🔊 Réponse vocale activée — cliquez pour couper"
+      : "🔇 Réponse vocale désactivée — cliquez pour activer";
+    if (!voiceState.enabled) voiceStop();
+  };
+  renderOutBtn();
+
+  outBtn.addEventListener("click", () => {
+    voiceState.enabled = !voiceState.enabled;
+    try { localStorage.setItem(VOICE_OUT_KEY, voiceState.enabled ? "1" : "0"); } catch (e) { /* noop */ }
+    renderOutBtn();
+    toast(voiceState.enabled ? "🔊 Réponse vocale activée." : "🔇 Réponse vocale désactivée.", "success");
+  });
+
+  /* --- 🎤 Dictée (Web Speech API) --- */
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const inputEl = $("#input");
+  if (!SR || !inputEl) {
+    micBtn.hidden = true; // navigateur sans reconnaissance vocale → bouton masqué
+    return;
+  }
+
+  const rec = new SR();
+  rec.lang = "fr-FR";
+  rec.interimResults = true;
+  rec.continuous = false;
+  rec.maxAlternatives = 1;
+
+  let finalText = "";
+  let phBefore = "";
+
+  const setListening = (on) => {
+    voiceState.listening = on;
+    micBtn.classList.toggle("recording", on);
+    micBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    if (on) { phBefore = inputEl.placeholder; inputEl.placeholder = "🎙️ Parlez, je vous écoute…"; }
+    else if (phBefore) { inputEl.placeholder = phBefore; }
+  };
+
+  rec.onstart = () => {
+    voiceStop();      // ne pas retranscrire la voix du bot
+    setListening(true);
+  };
+  rec.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const alt = e.results[i][0] ? e.results[i][0].transcript : "";
+      if (e.results[i].isFinal) finalText += alt; else interim += alt;
+    }
+    inputEl.value = (finalText + interim).replace(/^\s+/, "");
+    autoResize(inputEl);
+  };
+  rec.onerror = (e) => {
+    const code = (e && e.error) || "inconnu";
+    const msg =
+      code === "not-allowed" || code === "service-not-allowed"
+        ? "🎙️ Micro refusé — autorisez le microphone dans le navigateur."
+        : code === "no-speech" ? "🎙️ Aucune parole détectée."
+        : code === "network" ? "🎙️ Reconnaissance vocale indisponible (réseau)."
+        : "🎙️ Dictée impossible (" + code + ").";
+    toast(msg, "error");
+  };
+  rec.onend = () => {
+    setListening(false);
+    const text = (finalText || inputEl.value || "").trim();
+    finalText = "";
+    if (!text) return;
+    inputEl.value = text;
+    autoResize(inputEl);
+    // Envoi automatique : c'est le principe de la conversation vocale.
+    sendMessage(text, [...store.attachments]);
+  };
+
+  micBtn.addEventListener("click", () => {
+    voiceUnlock();
+    if (voiceState.listening) { try { rec.stop(); } catch (e) { /* noop */ } return; }
+    finalText = "";
+    inputEl.value = "";
+    autoResize(inputEl);
+    try { rec.start(); } catch (e) { /* déjà en cours */ }
+  });
+
+  document.addEventListener("click", voiceUnlock, { once: true });
+  document.addEventListener("touchstart", voiceUnlock, { once: true });
+}
+
+voiceInit();
 
 // L'app.js est chargé à la fin du <body> : le DOM est déjà analysé,
 // on initialise immédiatement (sans attendre DOMContentLoaded ni KaTeX).
