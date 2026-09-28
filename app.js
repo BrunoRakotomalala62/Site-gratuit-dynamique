@@ -2954,6 +2954,10 @@ const voiceState = {
   // drapeau le minuteur pouvait rouvrir le micro pile pendant cet intervalle
   // → le bot s'entendait parler. Voir aussi awaitingSince (garde-fou).
   awaitingSpeech: false, awaitingSince: 0,
+  // AJOUT : mode de capture retenu à l'initialisation — « speech » (Web Speech
+  // API), « recorder » (MediaRecorder + /api/stt : WebView Android, Firefox)
+  // ou « none ». Voir voiceInit().
+  mode: "none", recorder: false,
 };
 
 /* Ne lit que du texte naturel : ni code, ni LaTeX, ni markdown, ni emoji. */
@@ -3118,20 +3122,27 @@ function voiceInit() {
     toast(voiceState.enabled ? "🔊 Réponse vocale activée." : "🔇 Réponse vocale désactivée.", "success");
   });
 
-  /* --- 🎤 Dictée (Web Speech API) --- */
+  /* --- 🎤 Dictée : deux modes selon ce que le navigateur sait faire --------
+     1. « speech »   : Web Speech API du navigateur (Chrome). Natif et gratuit,
+                       transcription mot à mot en direct.
+     2. « recorder » : repli universel — on enregistre l'audio (MediaRecorder)
+                       et on l'envoie à /api/stt de chat-free-gpt (Whisper).
+                       INDISPENSABLE dans une WebView Android (application
+                       « Bruno Chat ») : la WebView n'implémente PAS la Web
+                       Speech API (cf. Chromium issue 40417848). Marche aussi
+                       sur Firefox.
+     ------------------------------------------------------------------------ */
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const inputEl = $("#input");
-  if (!SR || !inputEl) {
-    micBtn.hidden = true;            // pas de reconnaissance vocale → bouton masqué
+  const canRecord = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+    && typeof window.MediaRecorder === "function");
+  voiceState.mode = SR ? "speech" : (canRecord ? "recorder" : "none");
+
+  if (!inputEl || voiceState.mode === "none") {
+    micBtn.hidden = true;            // ni Web Speech ni enregistreur → masqué
     if (loopBtn) loopBtn.hidden = true;
     return;
   }
-
-  const rec = new SR();
-  rec.lang = "fr-FR";
-  rec.interimResults = true;
-  rec.continuous = false;
-  rec.maxAlternatives = 1;
 
   let finalText = "";
   let phBefore = "";
@@ -3140,8 +3151,10 @@ function voiceInit() {
     voiceState.listening = on;
     micBtn.classList.toggle("recording", on);
     micBtn.setAttribute("aria-pressed", on ? "true" : "false");
-    if (on) { phBefore = inputEl.placeholder; inputEl.placeholder = "🎙️ Parlez, je vous écoute…"; }
-    else {
+    if (on) {
+      phBefore = inputEl.placeholder;
+      inputEl.placeholder = voiceState.mode === "recorder" ? "🔴 Enregistrement… parlez" : "🎙️ Parlez, je vous écoute…";
+    } else {
       if (phBefore) inputEl.placeholder = phBefore;
       voiceState.since = Date.now(); // AJOUT : départ du délai de réarmement
     }
@@ -3153,12 +3166,196 @@ function voiceInit() {
   const assistantDone = () =>
     document.querySelectorAll("#chatArea .msg.assistant .msg-meta").length;
 
-  /* AJOUT — ouvre le micro (utilisé par la dictée simple ET par la boucle 🎧). */
-  const listenStart = () => {
-    if (voiceState.listening) return;
-    finalText = "";
-    try { rec.start(); } catch (e) { /* déjà en cours */ }
-  };
+  // Définies par le mode retenu ci-dessous (dictée simple ET boucle 🎧).
+  let listenStart = () => {};
+  let stopListening = () => {};
+
+  /* ================= Mode 1 : Web Speech API (Chrome) ================= */
+  if (voiceState.mode === "speech") {
+    const rec = new SR();
+    rec.lang = "fr-FR";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+
+    listenStart = () => {
+      if (voiceState.listening) return;
+      finalText = "";
+      try { rec.start(); } catch (e) { /* déjà en cours */ }
+    };
+    stopListening = () => { if (voiceState.listening) { try { rec.stop(); } catch (e) { /* noop */ } } };
+
+    rec.onstart = () => {
+      voiceStop();      // ne pas retranscrire la voix du bot
+      setListening(true);
+    };
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const alt = e.results[i][0] ? e.results[i][0].transcript : "";
+        if (e.results[i].isFinal) finalText += alt; else interim += alt;
+      }
+      inputEl.value = (finalText + interim).replace(/^\s+/, "");
+      autoResize(inputEl);
+    };
+    rec.onerror = (e) => {
+      const code = (e && e.error) || "inconnu";
+      // En discussion vocale, un silence n'est PAS une erreur : la boucle
+      // réarmera le micro toute seule (voir le minuteur plus bas).
+      if (voiceState.autoLoop && code === "no-speech") return;
+      const msg =
+        code === "not-allowed" || code === "service-not-allowed"
+          ? "🎙️ Micro refusé — autorisez le microphone dans le navigateur."
+          : code === "no-speech" ? "🎙️ Aucune parole détectée."
+          : code === "network" ? "🎙️ Reconnaissance vocale indisponible (réseau)."
+          : "🎙️ Dictée impossible (" + code + ").";
+      toast(msg, "error");
+      // Erreurs bloquantes : on arrête la boucle pour ne pas tourner à vide.
+      if (voiceState.autoLoop && ["not-allowed", "service-not-allowed", "network", "audio-capture"].indexOf(code) !== -1 && loopStop) {
+        loopStop("🎧 Discussion vocale arrêtée (micro indisponible).");
+      }
+    };
+    rec.onend = () => {
+      setListening(false);
+      const text = (finalText || inputEl.value || "").trim();
+      finalText = "";
+      if (!text) {
+        // Silence : hors boucle on ne fait rien ; en discussion vocale le
+        // minuteur réarme le micro (et on abandonne après 6 silences d'affilée).
+        voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
+        if (voiceState.autoLoop && voiceState.silentTurns >= 6 && loopStop) {
+          loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
+        }
+        return;
+      }
+      voiceState.silentTurns = 0;
+      inputEl.value = text;
+      autoResize(inputEl);
+      // Envoi automatique : c'est le principe de la conversation vocale.
+      // On marque le tour AVANT d'envoyer (sendMessage pose `store.sending` un
+      // peu plus loin, après un await) : le micro ne peut donc pas se rouvrir
+      // pendant que la question est en cours de traitement.
+      voiceState.turn = store.sending ? null : { at: Date.now(), from: assistantDone() };
+      sendMessage(text, [...store.attachments]);
+    };
+    voiceState.recorder = false;
+  } else {
+    /* ===== Mode 2 : enregistreur + /api/stt (WebView Android, Firefox…) =====
+       On enregistre jusqu'au silence (analyse RMS), puis on transcrit côté
+       serveur. Le reste — envoi, historique, réponse, lecture vocale, boucle
+       🎧 — passe par exactement les mêmes fonctions que la dictée Web Speech. */
+    voiceState.recorder = true;
+    let mediaRec = null, stream = null, chunks = [], watchTimer = null, audioCtx = null, recStartAt = 0, starting = false;
+
+    const releaseStream = () => {
+      if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+      if (audioCtx) { try { audioCtx.close(); } catch (e) { /* noop */ } audioCtx = null; }
+      if (stream) { try { stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* noop */ } stream = null; }
+    };
+
+    /* Envoie l'audio enregistré à /api/stt, puis passe par sendMessage(). */
+    const finishRecording = async () => {
+      const wasLoop = voiceState.autoLoop;
+      const blob = new Blob(chunks, { type: (mediaRec && mediaRec.mimeType) || "audio/webm" });
+      chunks = [];
+      releaseStream();
+      setListening(false);
+      if (!blob.size) return;   // rien capté : le minuteur réarmera si besoin
+      try {
+        const fd = new FormData();
+        fd.append("audio", blob, "voix.webm");
+        fd.append("language", "fr");
+        const res = await fetch(`${API_BASE}/api/stt`, { method: "POST", body: fd });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.success) {
+          throw new Error((data && data.error) || `HTTP ${res.status}`);
+        }
+        const text = String(data.text || "").trim();
+        if (!text) {
+          voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
+          if (wasLoop && voiceState.silentTurns >= 6 && loopStop) {
+            loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
+          }
+          return;
+        }
+        voiceState.silentTurns = 0;
+        inputEl.value = text;
+        autoResize(inputEl);
+        voiceState.turn = store.sending ? null : { at: Date.now(), from: assistantDone() };
+        sendMessage(text, [...store.attachments]);
+      } catch (err) {
+        toast("🎙️ Transcription impossible : " + (err && err.message ? err.message : err), "error");
+        if (wasLoop && loopStop) loopStop("🎧 Discussion vocale arrêtée (transcription indisponible).");
+      }
+    };
+
+    /* Fin de parole détectée par le niveau sonore (RMS) → envoi automatique. */
+    const watchSilence = (s) => {
+      const SILENCE_RMS = 0.012, SILENCE_MS = 1200, MIN_MS = 400, MAX_MS = 15000;
+      let lastLoud = Date.now();
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 1024;
+        audioCtx.createMediaStreamSource(s).connect(analyser);
+        const buf = new Uint8Array(analyser.fftSize);
+        watchTimer = setInterval(() => {
+          analyser.getByteTimeDomainData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+          if (Math.sqrt(sum / buf.length) > SILENCE_RMS) lastLoud = Date.now();
+          const elapsed = Date.now() - recStartAt;
+          if (elapsed > MAX_MS || (elapsed > MIN_MS && Date.now() - lastLoud > SILENCE_MS)) stopListening();
+        }, 100);
+      } catch (e) {
+        // Analyse indisponible : garde-fou purement temporel.
+        watchTimer = setInterval(() => { if (Date.now() - recStartAt > 8000) stopListening(); }, 200);
+      }
+    };
+
+    listenStart = async () => {
+      if (voiceState.listening || starting) return;
+      finalText = "";
+      starting = true;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+      } catch (err) {
+        starting = false;
+        const n = (err && err.name) || "inconnu";
+        toast(n === "NotAllowedError"
+          ? "🎙️ Micro refusé — autorisez le microphone dans l'application."
+          : "🎙️ Micro indisponible (" + n + ").", "error");
+        if (voiceState.autoLoop && loopStop) loopStop("🎧 Discussion vocale arrêtée (micro indisponible).");
+        return;
+      }
+      try {
+        chunks = [];
+        mediaRec = new MediaRecorder(stream);
+        mediaRec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+        mediaRec.onstop = finishRecording;
+        mediaRec.start();
+      } catch (err) {
+        starting = false;
+        releaseStream();
+        toast("🎙️ Enregistrement impossible : " + (err && err.message ? err.message : err), "error");
+        if (voiceState.autoLoop && loopStop) loopStop("🎧 Discussion vocale arrêtée.");
+        return;
+      }
+      starting = false;
+      recStartAt = Date.now();
+      voiceStop();          // ne pas capturer la voix du bot
+      setListening(true);
+      watchSilence(stream);
+    };
+
+    stopListening = () => {
+      if (mediaRec && mediaRec.state === "recording") {
+        try { mediaRec.stop(); } catch (e) { releaseStream(); setListening(false); }
+      }
+    };
+  }
 
   /* AJOUT — 🎧 entre en discussion vocale mains libres. */
   loopStart = () => {
@@ -3179,7 +3376,7 @@ function voiceInit() {
     voiceState.autoLoop = false;
     voiceState.silentTurns = 0;
     renderLoopBtn();
-    if (voiceState.listening) { try { rec.stop(); } catch (e) { /* noop */ } }
+    if (voiceState.listening) stopListening();
     voiceStop();
     if (message) toast(message, type || "error");
   };
@@ -3192,65 +3389,12 @@ function voiceInit() {
     });
   }
 
-  rec.onstart = () => {
-    voiceStop();      // ne pas retranscrire la voix du bot
-    setListening(true);
-  };
-  rec.onresult = (e) => {
-    let interim = "";
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const alt = e.results[i][0] ? e.results[i][0].transcript : "";
-      if (e.results[i].isFinal) finalText += alt; else interim += alt;
-    }
-    inputEl.value = (finalText + interim).replace(/^\s+/, "");
-    autoResize(inputEl);
-  };
-  rec.onerror = (e) => {
-    const code = (e && e.error) || "inconnu";
-    // En discussion vocale, un silence n'est PAS une erreur : la boucle
-    // réarmera le micro toute seule (voir le minuteur plus bas).
-    if (voiceState.autoLoop && code === "no-speech") return;
-    const msg =
-      code === "not-allowed" || code === "service-not-allowed"
-        ? "🎙️ Micro refusé — autorisez le microphone dans le navigateur."
-        : code === "no-speech" ? "🎙️ Aucune parole détectée."
-        : code === "network" ? "🎙️ Reconnaissance vocale indisponible (réseau)."
-        : "🎙️ Dictée impossible (" + code + ").";
-    toast(msg, "error");
-    // Erreurs bloquantes : on arrête la boucle pour ne pas tourner à vide.
-    if (voiceState.autoLoop && ["not-allowed", "service-not-allowed", "network", "audio-capture"].indexOf(code) !== -1 && loopStop) {
-      loopStop("🎧 Discussion vocale arrêtée (micro indisponible).");
-    }
-  };
-  rec.onend = () => {
-    setListening(false);
-    const text = (finalText || inputEl.value || "").trim();
-    finalText = "";
-    if (!text) {
-      // Silence : hors boucle on ne fait rien ; en discussion vocale le
-      // minuteur réarme le micro (et on abandonne après 6 silences d'affilée).
-      voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
-      if (voiceState.autoLoop && voiceState.silentTurns >= 6 && loopStop) {
-        loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
-      }
-      return;
-    }
-    voiceState.silentTurns = 0;
-    inputEl.value = text;
-    autoResize(inputEl);
-    // Envoi automatique : c'est le principe de la conversation vocale.
-    // On marque le tour AVANT d'envoyer (sendMessage pose `store.sending` un
-    // peu plus loin, après un await) : le micro ne peut donc pas se rouvrir
-    // pendant que la question est en cours de traitement.
-    voiceState.turn = store.sending ? null : { at: Date.now(), from: assistantDone() };
-    sendMessage(text, [...store.attachments]);
-  };
-
   micBtn.addEventListener("click", () => {
     voiceUnlock();
     // En discussion vocale, 🎤 sert de bouton d'arrêt.
     if (voiceState.autoLoop) { if (loopStop) loopStop("🎧 Discussion vocale arrêtée.", "success"); return; }
-    if (voiceState.listening) { try { rec.stop(); } catch (e) { /* noop */ } return; }
+    // Déjà en écoute → on arrête (en mode enregistreur, cela envoie l'audio).
+    if (voiceState.listening) { stopListening(); return; }
     finalText = "";
     inputEl.value = "";
     autoResize(inputEl);
