@@ -49,15 +49,36 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
   Le micro **ne se rouvre jamais pendant que le bot parle** — ni pendant la
   synthèse de sa voix (aucun écho). Il faut juste le micro du navigateur :
   aucune saisie de texte, aucun clavier.
+  **Deux modes de dictée, choisis automatiquement :**
+  1. **Web Speech API** (Chrome) — transcription native du navigateur, mot à mot.
+  2. **Enregistreur** (si la Web Speech API est absente) — le site enregistre
+     l'audio avec `MediaRecorder`, détecte la fin de la parole (seuil sonore) et
+     le fait transcrire par **`/api/stt`** de `chat-free-gpt` (Whisper).
+     **Indispensable dans l'application Android** : une WebView Android
+     n'implémente pas la Web Speech API (Chromium issue 40417848). Fait aussi
+     marcher la voix sur **Firefox**.
   Les deux réglages séparés restent disponibles : **🎤** dicter un seul message,
   **🔊** lire les réponses à voix haute. Un petit **🔊** sur chaque réponse du bot
   permet de la réécouter.
-  La dictée utilise la reconnaissance vocale du navigateur (**fr-FR**), la voix
-  est la synthèse Microsoft Edge via `/api/tts` de `chat-free-gpt` (**gratuite,
-  sans clé**). Le texte lu est nettoyé (code, LaTeX, markdown, emojis, URL
-  retirés) et coupé proprement à la dernière phrase (700 caractères).
+  La voix de sortie est la synthèse Microsoft Edge via `/api/tts` de
+  `chat-free-gpt` (**gratuite, sans clé**). Le texte lu est nettoyé (code, LaTeX,
+  markdown, emojis, URL retirés) et coupé proprement à la dernière phrase
+  (700 caractères).
   Le mode vocal s'arrête en recliquant **🎧** (ou **🎤**), en coupant **🔊**, ou
   automatiquement si l'onglet passe en arrière-plan ou après 6 silences.
+- 🔁 **Tour de parole strict (le bot ne se répond jamais tout seul)**. Le bot
+  attend que **vous** parliez, répond, puis attend de nouveau. Trois garde-fous :
+  1. **Aucun envoi si personne n'a parlé** — l'enregistrement n'est transmis que
+     si du son a réellement dépassé le seuil (≥ 250 ms). Sans ça, Whisper
+     *invente* du texte sur le silence (« sous-titres réalisés par… »), ce texte
+     partait comme message et le bot discutait tout seul, indéfiniment.
+  2. **Filtre anti-hallucination** — les phrases typiques inventées par Whisper
+     sur du silence sont rejetées, dans les deux modes de dictée.
+  3. **Détection d'écho** — si la même phrase revient plusieurs fois d'affilée,
+     le micro capte la voix du bot : la discussion s'arrête avec un message
+     conseillant un écouteur, au lieu de boucler.
+  Vérifié : micro **totalement silencieux** → **0 réponse** du bot en 70 s
+  (avant correction : **10 réponses**), et **0 appel inutile** à `/api/stt`.
   Tous ces ajouts sont **additifs** : le chat, les figures et les pièces jointes
   ne sont pas modifiés.
 - 🎨 **UI premium & dynamique** : thème sombre, glassmorphism, fond animé
@@ -253,6 +274,19 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
   le panneau ouvert, allume la pastille du ＋, et les deux états sont visuellement
   distincts (violet / vert) ; fermeture par clic extérieur **et** Échap ; le champ
   passe de 44 → 85 px avec le texte ; composer existant intact. **13/13**.
+- ✅ **Tour de parole / anti-boucle** (2026-09-28) : boucle 🎧 lancée avec un
+  micro **totalement silencieux** pendant 70 s → **0 réponse** du bot et **0 appel
+  à `/api/stt`** (avant correction : **10 réponses**, le bot se parlait à lui-même
+  parce que Whisper inventait du texte sur le silence). La même vérification avec
+  une vraie phrase donne toujours la transcription exacte.
+- ✅ **Mode « enregistreur »** (dictée sans Web Speech API — cas de l'APK Android
+  et de Firefox), testé avec **`SpeechRecognition` supprimé** et un **faux micro**
+  (fichier WAV français + silence, Chrome) : mode choisi automatiquement ;
+  boutons 🎤/🎧 **visibles** (avant, ils étaient masqués — c'était le bug de
+  l'APK) ; enregistrement → silence détecté → **`/api/stt` HTTP 200** →
+  transcription exacte (« …pourquoi le ciel est bleu ? ») → envoi → réponse ;
+  puis **boucle 🎧** : réponse obtenue **et micro réarmé tout seul**, réponse lue
+  à voix haute, arrêt par 🎤. **10/10**.
 - ✅ **Mode vocal** (2026-09-28, Chrome headless) : boutons 🎤/🔊/🎧 présents ;
   bascule 🔊 mémorisée dans `localStorage` ; **appel réel** à
   `https://chat-free-gpt.vercel.app/api/tts` → 200, ~31 Ko de MP3 en ~2 s ;
