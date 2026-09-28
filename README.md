@@ -71,6 +71,14 @@ sur Vercel, branché sur l'API gratuite
   la logique existante (images/vision, figures, suites de conversation) reste
   inchangée. Les PDF scannés (images) nécessitent un OCR et sont refusés avec
   un message clair.
+- 🧩 **PDF longs — découpage puis recombinaison** : si le document dépasse le
+  budget d'un seul appel (~3 200 car.), il est **découpé** en morceaux (aux
+  frontières de lignes/phrases/mots), le modèle est interrogé **sur chaque
+  morceau** (progression « 📄 Analyse du document — partie i/n… »), puis
+  **toutes les réponses sont recombinées** en une seule réponse complète (une
+  section « 📄 Partie i/n » par morceau). Garde-fou : les **10 premiers
+  morceaux** sont analysés (au-delà, le document est signalé comme tronqué).
+  Un PDF court garde le chemin en **un seul appel** (comportement inchangé).
 - 🖼️ **Réponses multi-images** : l'API renvoie un tableau `images[]` — toutes
   les images sont affichées en grille cliquable (lightbox).
 - 📜 **Menu hamburger** (en haut à gauche) : bouton **Nouvelle conversation** +

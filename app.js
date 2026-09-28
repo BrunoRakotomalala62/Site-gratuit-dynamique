@@ -1779,11 +1779,25 @@ async function sendMessage(text, attachments) {
   // AJOUT — PDF joint : le texte extrait (dans le navigateur) est ajouté à la
   // demande envoyée à l'API. Le PDF n'est jamais transmis tel quel : la
   // logique texte + images de l'API reste donc inchangée.
+  //   • PDF court → un seul appel (texte ajouté au prompt).
+  //   • PDF trop long → DÉCOUPAGE en morceaux, un appel par morceau, puis
+  //     RECOMBINAISON de toutes les réponses (voir callPdfChunks).
+  let pdfChunks = null;
   if (store.pdfs && store.pdfs.length) {
     if (!sendText) sendText = "Résume ce document.";
-    const pdf = buildPdfNote();
-    sendText += pdf.note;
-    if (pdf.truncated) toast("Texte du PDF tronqué pour tenir dans la limite de l'API.", "success");
+    const plan = buildPdfChunks();
+    if (plan) {
+      pdfChunks = plan.chunks;
+      if (plan.truncated) {
+        toast(`📄 Document long : les ${plan.chunks.length} premières parties sur ${plan.totalChunks} seront analysées.`, "success");
+      } else {
+        toast(`📄 Document long : découpage en ${plan.chunks.length} parties, analyse puis recombinaison…`, "success");
+      }
+    } else {
+      const pdf = buildPdfNote();
+      sendText += pdf.note;
+      if (pdf.truncated) toast("Texte du PDF tronqué pour tenir dans la limite de l'API.", "success");
+    }
   }
 
   empty.style.display = "none";
@@ -1855,7 +1869,11 @@ async function sendMessage(text, attachments) {
       return; // le bloc finally fait le ménage (sending, historique, scroll…)
     }
 
-    const data = await callApi(sendText, toSend, undefined, convCtx);
+    // AJOUT PDF long : un appel par partie, puis recombinaison des réponses
+    // complètes (callPdfChunks) ; le PDF court garde l'appel unique habituel.
+    const data = pdfChunks
+      ? await callPdfChunks(sendText, pdfChunks, toSend, typing)
+      : await callApi(sendText, toSend, undefined, convCtx);
     // retirer l'indicateur
     typing.remove();
 
@@ -2469,6 +2487,103 @@ function msgPdfsHtml(pdfs) {
     .map((d) => `<span class="msg-pdf-chip">📄 ${escapeHtml(d.name)}${d.pages ? ` · ${d.pages} p.` : ""}</span>`)
     .join("");
   return `<div class="msg-pdfs">${chips}</div>`;
+}
+
+/* ---------- PDF trop long : découpage puis recombinaison ----------
+   Quand le document dépasse le budget d'un seul appel (PDF_MAX_CHARS), on
+   le DÉCOUPE en morceaux, on interroge le modèle sur CHAQUE morceau, puis on
+   RECOMBINE toutes les réponses en une seule réponse complète (une section
+   par partie). Aucun appel n'est ajouté pour les PDF courts (comportement
+   inchangé). */
+const PDF_CHUNK_CHARS = 2800;  // taille d'un morceau (morceau + question < 4000)
+const PDF_MAX_CHUNKS = 10;     // garde-fou de durée : au-delà, le document est tronqué
+
+/** Découpe un texte long en préférant les frontières naturelles (ligne, phrase, mot). */
+function splitPdfText(text, size) {
+  const chunks = [];
+  let rest = String(text || "").trim();
+  while (rest.length > size) {
+    let cut = rest.lastIndexOf("\n", size);
+    if (cut < size * 0.5) cut = rest.lastIndexOf(". ", size) + 1;
+    if (cut < size * 0.5) cut = rest.lastIndexOf(" ", size);
+    if (cut < size * 0.5) cut = size;
+    chunks.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) chunks.push(rest);
+  return chunks.filter(Boolean);
+}
+
+/**
+ * Prépare le traitement d'un PDF long.
+ * @returns {{chunks: string[], truncated: boolean, total: number, totalChunks: number}|null}
+ *          null si le document tient en un seul appel (comportement court).
+ */
+function buildPdfChunks() {
+  if (!store.pdfs || !store.pdfs.length) return null;
+  const total = store.pdfs.reduce((s, d) => s + d.text.length, 0);
+  if (total <= PDF_MAX_CHARS) return null; // court → appel unique (buildPdfNote)
+  const full = store.pdfs.map((d) => d.text).join("\n");
+  const all = splitPdfText(full, PDF_CHUNK_CHARS);
+  return {
+    chunks: all.slice(0, PDF_MAX_CHUNKS),
+    truncated: all.length > PDF_MAX_CHUNKS,
+    total,
+    totalChunks: all.length,
+  };
+}
+
+/** Petit statut affiché sous l'indicateur « en train d'écrire ». */
+function setTypingStatus(typingEl, label) {
+  if (!typingEl) return;
+  const bubble = typingEl.querySelector(".msg-bubble");
+  if (!bubble) return;
+  let note = typingEl.querySelector(".typing-note");
+  if (!note) { note = el("div", "typing-note", ""); bubble.appendChild(note); }
+  note.textContent = label;
+}
+
+/**
+ * PDF long : interroge le modèle sur CHAQUE morceau puis recombine les
+ * réponses complètes en une seule (une section par partie).
+ * @returns {Promise<{success: boolean, reply?: string, model?: string, error?: string}>}
+ */
+async function callPdfChunks(question, chunks, toSend, typingEl) {
+  const parts = [];
+  const failed = [];
+  let model = null;
+  for (let i = 0; i < chunks.length; i++) {
+    if (typingEl) setTypingStatus(typingEl, `📄 Analyse du document — partie ${i + 1}/${chunks.length}…`);
+    const prompt =
+      "Voici un EXTRAIT (partie " + (i + 1) + "/" + chunks.length + ") d'un document PDF. " +
+      "Réponds à la question en te fondant sur cet extrait. Si l'extrait ne contient pas " +
+      "l'information demandée, dis-le simplement en une phrase.\n" +
+      "--- EXTRAIT " + (i + 1) + "/" + chunks.length + " ---\n" + chunks[i] +
+      "\n--- FIN EXTRAIT ---\nQuestion : " + question;
+    let r = null;
+    try { r = await callApi(prompt, toSend, undefined, { history: [], reset: 1 }); }
+    catch (e) { r = null; }
+    if (r && r.success && r.reply && r.reply.trim()) {
+      parts.push({ i: i + 1, reply: r.reply.trim() });
+      model = model || r.model;
+    } else {
+      failed.push(i + 1);
+    }
+  }
+  if (!parts.length) {
+    return { success: false, error: "Aucune partie du document n'a pu être analysée (service momentanément indisponible).", model };
+  }
+  if (parts.length === 1 && !failed.length) {
+    return { success: true, reply: parts[0].reply, model };
+  }
+  // Recombinaison : toutes les réponses complètes, une section par partie.
+  let reply = parts
+    .map((p) => `### 📄 Partie ${p.i}/${chunks.length}\n\n${p.reply}`)
+    .join("\n\n---\n\n");
+  if (failed.length) {
+    reply += `\n\n> ⚠️ Partie(s) non analysée(s) : ${failed.join(", ")} / ${chunks.length}.`;
+  }
+  return { success: true, reply, model };
 }
 
 /* ---------- Sidebar ---------- */
