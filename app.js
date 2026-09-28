@@ -2639,8 +2639,8 @@ function closeLightbox() {
 /* ---------- Textarea auto-resize ---------- */
 function autoResize(ta) {
   ta.style.height = "auto";
-  // petit rectangle au repos ; grandit avec le texte (max 110 px)
-  ta.style.height = Math.min(ta.scrollHeight, 110) + "px";
+  // petit rectangle au repos ; grandit avec le texte (max 168 px)
+  ta.style.height = Math.min(ta.scrollHeight, 168) + "px";
 }
 
 /* ---------- Particules ---------- */
@@ -2948,6 +2948,12 @@ const voiceState = {
   // nouvelle réponse apparaisse (et que la lecture vocale soit finie) avant de
   // rouvrir le micro : c'est ce qui évite d'écouter le bot se répondre à lui-même.
   autoLoop: false, turn: null, since: 0, silentTurns: 0,
+  // AJOUT : une réponse vocale est attendue/en cours pour le tour courant.
+  // Indispensable : entre l'affichage de la réponse et le début de la lecture,
+  // il y a le temps de la synthèse (quelques centaines de ms) ; sans ce
+  // drapeau le minuteur pouvait rouvrir le micro pile pendant cet intervalle
+  // → le bot s'entendait parler. Voir aussi awaitingSince (garde-fou).
+  awaitingSpeech: false, awaitingSince: 0,
 };
 
 /* Ne lit que du texte naturel : ni code, ni LaTeX, ni markdown, ni emoji. */
@@ -2987,6 +2993,7 @@ function voiceRelease() {
   if (voiceState.url) { try { URL.revokeObjectURL(voiceState.url); } catch (e) { /* noop */ } }
   voiceState.audio = null;
   voiceState.url = null;
+  voiceState.awaitingSpeech = false;  // AJOUT : la voix attendue est arrivée (ou a échoué)
   voiceState.since = Date.now();      // AJOUT : base du réarmement du micro
   const btn = $("#voiceOutBtn");
   if (btn) btn.classList.remove("speaking");
@@ -3001,7 +3008,7 @@ function voiceStop() {
 async function voiceSpeak(text, opts) {
   const options = opts || {};
   const clean = voiceCleanText(text);
-  if (!clean) return;
+  if (!clean) { voiceState.awaitingSpeech = false; return; } // rien à lire : on libère
   voiceStop();
   const btn = $("#voiceOutBtn");
   try {
@@ -3040,6 +3047,10 @@ async function voiceSpeak(text, opts) {
 function maybeSpeakReply(msg) {
   if (!voiceState.enabled) return;
   if (!msg || msg.error || !msg.text) return;
+  // AJOUT : on annonce la lecture AVANT de la lancer (fetch compris) pour que
+  // le minuteur de la boucle 🎧 ne rouvre pas le micro pendant cet intervalle.
+  voiceState.awaitingSpeech = true;
+  voiceState.awaitingSince = Date.now();
   voiceSpeak(msg.text);
 }
 
@@ -3078,6 +3089,7 @@ function voiceInit() {
       ? "🔊 Réponse vocale activée — cliquez pour couper"
       : "🔇 Réponse vocale désactivée — cliquez pour activer";
     if (!voiceState.enabled) voiceStop();
+    updateMoreBadge(); // AJOUT : pastille du menu ＋
   };
   renderOutBtn();
 
@@ -3089,6 +3101,7 @@ function voiceInit() {
     loopBtn.title = voiceState.autoLoop
       ? "🎧 Discussion vocale en cours — cliquez pour arrêter"
       : "🎧 Discussion vocale : parlez, écoutez la réponse, et reparlez — sans toucher l'écran";
+    updateMoreBadge(); // AJOUT : pastille du menu ＋
   };
   renderLoopBtn();
 
@@ -3253,7 +3266,13 @@ function voiceInit() {
      rester bloqué (réseau lent, erreur…). */
   setInterval(() => {
     if (!voiceState.autoLoop || voiceState.listening) return;
-    if (voiceState.audio) return;                       // le bot parle → on attend
+    // On attend que le bot ait FINI de parler : soit l'audio joue, soit sa
+    // synthèse est encore en cours (awaitingSpeech). Passé 30 s sans voix,
+    // on considère qu'elle ne viendra pas et on reprend la parole.
+    if (voiceState.awaitingSpeech && Date.now() - voiceState.awaitingSince > 30000) {
+      voiceState.awaitingSpeech = false;
+    }
+    if (voiceState.audio || voiceState.awaitingSpeech) return;
     if (voiceState.turn) {
       const replied = assistantDone() > voiceState.turn.from;
       const stalled = Date.now() - voiceState.turn.at > 90000;
@@ -3277,6 +3296,62 @@ function voiceInit() {
 }
 
 voiceInit();
+
+/* ============================================================
+   AJOUT — menu déroulant « ＋ » du composer
+   ------------------------------------------------------------
+   Regroupe pièces jointes, images et voix dans un panneau, pour
+   laisser TOUTE la largeur au champ de saisie (avant : 6 boutons
+   entassés à côté, champ minuscule sur mobile).
+
+   Purement additif : les boutons gardent leurs identifiants et
+   leurs gestionnaires, la logique existante n'est pas touchée.
+   ============================================================ */
+function updateMoreBadge() {
+  const btn = $("#moreBtn");
+  if (!btn) return;
+  const on = !!(voiceState.enabled || voiceState.autoLoop || (store && store.mode && store.mode !== "chat"));
+  btn.classList.toggle("has-active", on);
+  btn.title = on
+    ? "Plus d'options — des options sont actives (voir la pastille)"
+    : "Plus d'options — pièces jointes, images, voix";
+}
+
+function voiceMenuInit() {
+  const btn = $("#moreBtn");
+  const panel = $("#morePanel");
+  if (!btn || !panel) return;
+
+  const setOpen = (open) => {
+    panel.hidden = !open;
+    btn.classList.toggle("open", open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) updateMoreBadge();
+  };
+  setOpen(false);
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();          // ne pas déclencher la fermeture globale
+    setOpen(panel.hidden);
+  });
+
+  panel.addEventListener("click", (e) => {
+    // 🔊 et 🎧 (.more-keep) laissent le panneau ouvert pour qu'on voie
+    // l'état changer ; les autres entrées le referment.
+    const item = e.target && e.target.closest ? e.target.closest(".more-item") : null;
+    e.stopPropagation();
+    if (!item || !item.classList.contains("more-keep")) setOpen(false);
+    updateMoreBadge();
+  });
+
+  // Fermeture : clic ailleurs, ou touche Échap.
+  document.addEventListener("click", () => { if (!panel.hidden) setOpen(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) setOpen(false); });
+
+  updateMoreBadge();
+}
+
+voiceMenuInit();
 
 // L'app.js est chargé à la fin du <body> : le DOM est déjà analysé,
 // on initialise immédiatement (sans attendre DOMContentLoaded ni KaTeX).

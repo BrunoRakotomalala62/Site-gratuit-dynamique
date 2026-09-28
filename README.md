@@ -34,15 +34,22 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
 
 ## ✨ Fonctionnalités
 
-- 🎙️ **Mode vocal — discussion « voix à voix »** : un seul bouton, **🎧**, dans
-  la barre de saisie, et on ne touche plus à rien :
+- 🧩 **Barre de saisie épurée** : le champ de message occupe **toute la largeur**
+  (~87 % de la barre). Toutes les actions sont regroupées dans un **menu
+  déroulant « ＋ »** qui s'ouvre au-dessus (il ne pousse pas la mise en page),
+  avec des sections claires : **Joindre** (images, image par URL, PDF),
+  **Images** (générer, modifier) et **Voix** (dicter, réponse vocale, discussion
+  mains libres). Une **pastille verte** sur le ＋ signale qu'une option est
+  active. Fermeture par clic extérieur ou Échap. Le champ s'agrandit avec le
+  texte (jusqu'à 168 px).
+- 🎙️ **Mode vocal — discussion « voix à voix »** : un seul bouton, **🎧** (menu ＋),
+  et on ne touche plus à rien :
   **on parle → le message part tout seul → le bot répond à voix haute → le micro
   se rouvre tout seul → on reparle…** C'est une vraie conversation mains libres.
-  Le micro **ne se rouvre jamais pendant que le bot parle** (aucun écho : le site
-  attend la fin de la lecture, que la réponse soit affichée, et qu'aucun envoi
-  ne soit en cours ; garde-fou de 90 s). Il faut juste le micro du navigateur —
+  Le micro **ne se rouvre jamais pendant que le bot parle** — ni pendant la
+  synthèse de sa voix (aucun écho). Il faut juste le micro du navigateur :
   aucune saisie de texte, aucun clavier.
-  Les deux boutons séparés restent disponibles : **🎤** dicter un seul message,
+  Les deux réglages séparés restent disponibles : **🎤** dicter un seul message,
   **🔊** lire les réponses à voix haute. Un petit **🔊** sur chaque réponse du bot
   permet de la réécouter.
   La dictée utilise la reconnaissance vocale du navigateur (**fr-FR**), la voix
@@ -239,6 +246,13 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
 - ✅ Figures : `GET /api/plot?expression=x-2ln(x)` (courbe) et
   `GET /api/plot?subject=circuit+électrique…` (schéma IA) → `{ svg }`
 - ✅ Détection figures : `node test-figures.js` (31 tests)
+- ✅ **Barre de saisie + menu ＋** (2026-09-28, Chrome headless) : le champ
+  occupe **87 %** de la barre (702/806 px) et ne reste que **2 boutons** dans la
+  barre (＋ et ➤) ; menu fermé au départ puis ouvert/positionné **au-dessus** ;
+  les **8 actions** sont regroupées et étiquetées ; un interrupteur (🔊/🎧) garde
+  le panneau ouvert, allume la pastille du ＋, et les deux états sont visuellement
+  distincts (violet / vert) ; fermeture par clic extérieur **et** Échap ; le champ
+  passe de 44 → 85 px avec le texte ; composer existant intact. **13/13**.
 - ✅ **Mode vocal** (2026-09-28, Chrome headless) : boutons 🎤/🔊/🎧 présents ;
   bascule 🔊 mémorisée dans `localStorage` ; **appel réel** à
   `https://chat-free-gpt.vercel.app/api/tts` → 200, ~31 Ko de MP3 en ~2 s ;
@@ -247,6 +261,10 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
 - ✅ **Discussion vocale mains libres 🎧** (reconnaissance vocale simulée pour
   rendre le tour déterministe) : activation → micro ouvert ; parole → envoi
   automatique à la vraie API ; réponse affichée ; voix générée puis jouée ;
-  **micro rouvert seulement après la fin de la lecture** (vérifié explicitement :
-  aucune réouverture pendant que le bot parle → pas d'écho) ; arrêt par 🎤 et par
-  coupure du 🔊 ; plus aucune réouverture après l'arrêt. **9/9**.
+  **micro rouvert seulement après la fin de la lecture**. Cette vérification
+  « aucune réouverture du micro avant la fin de la voix » a d'ailleurs révélé
+  une **course intermittente** (entre l'affichage de la réponse et le début de
+  la lecture, la synthèse prenait ~0,5 s pendant lesquelles le micro pouvait
+  se rouvrir) : corrigée par un drapeau `awaitingSpeech` posé dès l'annonce de
+  la lecture. Test relancé **3 fois de suite** → 9/9 à chaque fois.
+  Arrêt par 🎤 et par coupure du 🔊 ; plus aucune réouverture après l'arrêt. **9/9**.
