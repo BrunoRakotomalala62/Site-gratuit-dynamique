@@ -20,6 +20,12 @@ const API_BASE_3 = "https://chatipro.vercel.app";
 const API_URL_3 = `${API_BASE_3}/api/chat`;
 const API_IMAGE_3 = `${API_BASE_3}/api/image`;
 const API_IMAGE_EDIT_3 = `${API_BASE_3}/api/image/edit`;
+
+/* AJOUT — Magic Hour : édition d'image par IA (modèles GRATUITS).
+   Nouvelle route *de ce site* (fonction Vercel api/image-edit.js) : la clé
+   MAGIC_HOUR_API_KEY reste côté serveur, jamais dans le navigateur.
+   ChatiPro (ci-dessus) reste intact : les deux options coexistent. */
+const API_IMAGE_EDIT_MH = "/api/image-edit";
 const API_PLOT_URL = `${API_BASE}/api/plot`; // figures : courbes (expression=) & schémas IA (subject=)
 
 /* AJOUT — Lumo (Proton) : API l-umoprotonme.vercel.app (Lumo 2.0 Max).
@@ -74,6 +80,7 @@ const MODELS = {
   "🖼️ Images": [
     ["__img_gen__", "🎨 générer une image"],
     ["__img_edit__", "🖌️ modifier une image jointe"],
+    ["__img_edit_mh__", "✨ modifier · Magic Hour (gratuit)"],
   ],
   "Réservés PRO 🔒": [
     ["gpt-5.6-terra", "gpt-5.6-terra (PRO)"],
@@ -116,7 +123,8 @@ const LUMO_MODELS = new Set(["lumo-max", "lumo"]);
 
 const IMG_GEN_MODEL = "__img_gen__";
 const IMG_EDIT_MODEL = "__img_edit__";
-const IMAGE_MODELS = new Set([IMG_GEN_MODEL, IMG_EDIT_MODEL]);
+const IMG_EDIT_MH_MODEL = "__img_edit_mh__"; // AJOUT : édition via Magic Hour (gratuit)
+const IMAGE_MODELS = new Set([IMG_GEN_MODEL, IMG_EDIT_MODEL, IMG_EDIT_MH_MODEL]);
 
 /* ---------- État ---------- */
 const store = {
@@ -126,7 +134,7 @@ const store = {
   sending: false,
   attachments: [],      // {type:'data'|'url', name, value}
   pdfs: [],             // AJOUT : PDF joints {name, text, pages} — texte extrait dans le navigateur
-  mode: "chat",         // "chat" | "gen" (🎨 générer) | "edit" (🖼️ modifier)
+  mode: "chat",         // "chat" | "gen" (🎨 générer) | "edit" (🖼️ modifier) | "edit-mh" (✨ Magic Hour)
   lastChatModel: null,  // dernier modèle de chat (restauré après une image)
 };
 
@@ -1710,6 +1718,7 @@ async function sendMessage(text, attachments) {
   let imageMode = store.mode;
   if (selModel === IMG_GEN_MODEL) imageMode = "gen";
   else if (selModel === IMG_EDIT_MODEL) imageMode = "edit";
+  else if (selModel === IMG_EDIT_MH_MODEL) imageMode = "edit-mh"; // AJOUT Magic Hour
 
   // conversation courante
   let conv = getConversation(store.activeId);
@@ -1818,11 +1827,12 @@ async function sendMessage(text, attachments) {
 
   const userMsg = {
     role: "user",
-    text: (imageMode === "gen" ? "🎨 " : imageMode === "edit" ? "🖼️ " : "") + text.trim(),
+    text: (imageMode === "gen" ? "🎨 " : imageMode === "edit" ? "🖼️ " : imageMode === "edit-mh" ? "✨ " : "") + text.trim(),
     images: (attachments || []).map((a) => a.value), // nouvelles photos seulement (affichage)
     pdfs: (store.pdfs || []).map((d) => ({ name: d.name, pages: d.pages })), // AJOUT : PDF joints (affichage)
     model: imageMode === "gen" ? "🎨 ChatiPro"
       : imageMode === "edit" ? "🖌️ ChatiPro"
+      : imageMode === "edit-mh" ? "✨ Magic Hour"
       : (toSend.length && !VISION_MODELS.has(currentModel()) ? visionModel() : currentModel()), // vision : modèle choisi s'il est compatible image, sinon repli vision
     time: Date.now(),
   };
@@ -1855,18 +1865,23 @@ async function sendMessage(text, attachments) {
   try {
     // AJOUT : modes image ChatiPro (🎨 générer / 🖼️ modifier) — flux dédié,
     // la logique de chat existante n'est pas touchée.
-    if (imageMode === "gen" || imageMode === "edit") {
-      if (imageMode === "edit" && !editSrc) {
+    if (imageMode === "gen" || imageMode === "edit" || imageMode === "edit-mh") {
+      if ((imageMode === "edit" || imageMode === "edit-mh") && !editSrc) {
         throw new Error("Joignez d'abord une image (📎 ou 🔗) à modifier.");
       }
-      const imgRes = await runImageRequest(text.trim(), editSrc, imageMode);
+      // AJOUT : Magic Hour (gratuit) a son propre appairage ; ChatiPro reste inchangé.
+      const imgRes = imageMode === "edit-mh"
+        ? await runMagicHourEdit(text.trim(), editSrc)
+        : await runImageRequest(text.trim(), editSrc, imageMode);
       typing.remove();
       if (imgRes && imgRes.dataUrl) {
         const reply = {
           role: "assistant",
-          text: (imageMode === "edit" ? "🖼️ Image modifiée" : "🎨 Image générée"),
+          text: imageMode === "edit" ? "🖼️ Image modifiée"
+            : imageMode === "edit-mh" ? "✨ Image modifiée (Magic Hour)"
+            : "🎨 Image générée",
           images: [imgRes.dataUrl],
-          model: "ChatiPro 🎨",
+          model: imageMode === "edit-mh" ? "Magic Hour ✨" : "ChatiPro 🎨",
           time: Date.now(),
         };
         conv.messages.push(reply);
@@ -2166,12 +2181,20 @@ function setComposerMode(mode) {
   store.mode = mode || "chat";
   const gen = $("#genBtn");
   const edit = $("#editImgBtn");
+  const editMh = $("#editMhBtn");
   if (gen) gen.classList.toggle("active", store.mode === "gen");
+  // AJOUT : les DEUX modes « modifier » (ChatiPro et Magic Hour) nécessitent
+  // une image jointe ; on ne change que l'affichage des boutons.
+  const hasImage = store.attachments.length > 0;
   if (edit) {
-    edit.hidden = store.attachments.length === 0;
+    edit.hidden = !hasImage;
     edit.classList.toggle("active", store.mode === "edit");
-    if (store.mode === "edit" && store.attachments.length === 0) store.mode = "chat";
   }
+  if (editMh) {
+    editMh.hidden = !hasImage;
+    editMh.classList.toggle("active", store.mode === "edit-mh");
+  }
+  if ((store.mode === "edit" || store.mode === "edit-mh") && !hasImage) store.mode = "chat";
 }
 
 /* Après une génération/modification d'image, le sélecteur revient au
@@ -2214,6 +2237,54 @@ async function runImageRequest(prompt, imageSrc, mode) {
     return { error: err.message || "Erreur réseau." };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/* AJOUT — modification d'image via Magic Hour (route source /api/image-edit).
+   Le rendu Magic Hour est asynchrone : la fonction Vercel attend ("wait") et
+   renvoie l'image prête ; si son budget est dépassé, elle renvoie un id que
+   l'on interroge ici jusqu'à obtention du résultat. Modèle GRATUIT par défaut. */
+async function runMagicHourEdit(prompt, imageSrc, opts) {
+  opts = opts || {};
+  const model = opts.model || "flux-2-klein";     // gratuit (5 crédits/image)
+  const resolution = opts.resolution || "640px";  // résolution gratuite
+  try {
+    const res = await fetch(API_IMAGE_EDIT_MH, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        image: imageSrc,
+        prompt: String(prompt || "").slice(0, 1000),
+        model, resolution, aspect_ratio: "auto", wait: true,
+      }),
+    });
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* corps non JSON */ }
+    if (!data) return { error: `Réponse illisible (HTTP ${res.status}).` };
+    if (!res.ok || data.success === false) return { error: data.error || `Erreur HTTP ${res.status}` };
+    if (data.dataUrl) return { dataUrl: data.dataUrl, data };
+
+    // Rendu encore en cours côté Magic Hour → on interroge la route de statut.
+    const id = data.id;
+    if (!id) return { error: "Magic Hour n'a pas renvoyé d'identifiant de projet." };
+    for (let i = 0; i < 24; i++) {   // ~24 × 5 s ≲ 2 min
+      await new Promise((r) => setTimeout(r, 5000));
+      const r2 = await fetch(`${API_IMAGE_EDIT_MH}?id=${encodeURIComponent(id)}&wait=1`, { headers: { Accept: "application/json" } });
+      let d2 = null;
+      try { d2 = await r2.json(); } catch (e) { /* ignore */ }
+      if (!d2) continue;
+      if (d2.dataUrl) return { dataUrl: d2.dataUrl, data: d2 };
+      if (d2.status === "error" || d2.status === "canceled") {
+        const msg = d2.error && (d2.error.message || d2.error);
+        return { error: msg || `Rendu ${d2.status} (crédits remboursés par Magic Hour).` };
+      }
+    }
+    return { error: "Rendu trop long (plus de 2 min). Réessayez." };
+  } catch (err) {
+    if (err instanceof TypeError || /networkerror|failed to fetch|load failed/i.test(String(err.message || ""))) {
+      return { error: "Impossible de joindre /api/image-edit. Vérifiez que la fonction Vercel est bien déployée et que MAGIC_HOUR_API_KEY est définie dans les variables d'environnement." };
+    }
+    return { error: err.message || "Erreur réseau." };
   }
 }
 
@@ -2837,6 +2908,9 @@ function init() {
   // AJOUT — modes image ChatiPro (🎨 générer / 🖼️ modifier)
   $("#genBtn").onclick = () => setComposerMode(store.mode === "gen" ? "chat" : "gen");
   $("#editImgBtn").onclick = () => setComposerMode(store.mode === "edit" ? "chat" : "edit");
+  // AJOUT : édition Magic Hour (modèle gratuit) — nouveau bouton, logique ChatiPro intacte.
+  const editMhBtn = $("#editMhBtn");
+  if (editMhBtn) editMhBtn.onclick = () => setComposerMode(store.mode === "edit-mh" ? "chat" : "edit-mh");
   // URL : bouton dédié qui affiche une barre inline
   $("#urlBtn").onclick = () => {
     const row = $("#urlRow");
@@ -2909,6 +2983,8 @@ window.Lumina = {
   resolveSendImages, rememberedImages, clearImageMemory, clearFigureMemory,
   renderImageMemoryPill, svgToPngDataUri, rememberFigure, detectFigureRemark,
   renderMarkdown,
+  // AJOUT — exposés pour les tests du tour de parole (anti-écho)
+  voiceCleanText, voiceNormWords, voiceLooksLikeEcho,
 };
 
 // Affichage des erreurs JS (débogage à distance)
@@ -2938,6 +3014,10 @@ const VOICE_NAME_KEY = "lumina.voice.name.v1";
 const VOICE_NAME = "fr-FR-DeniseNeural";  // voix par défaut (voir /api/voices)
 const VOICE_MAX_CHARS = 700;              // longueur lue (coupée à la phrase)
 const VOICE_ERROR_COOLDOWN = 12000;       // anti-spam des messages d'erreur
+/* AJOUT — durée minimale de son au-dessus du seuil pour considérer qu'une
+   personne a vraiment parlé (mode enregistreur). Trop bas, Whisper transcrit
+   du bruit et invente du texte ; trop haut, une voix douce serait ignorée. */
+const VOICE_MIN_LOUD_MS = 400;
 
 const voiceState = {
   enabled: false, listening: false, voice: VOICE_NAME,
@@ -2948,12 +3028,23 @@ const voiceState = {
   // nouvelle réponse apparaisse (et que la lecture vocale soit finie) avant de
   // rouvrir le micro : c'est ce qui évite d'écouter le bot se répondre à lui-même.
   autoLoop: false, turn: null, since: 0, silentTurns: 0,
+  // AJOUT — VERROU DE TRANSCRIPTION. Vrai pendant l'envoi de l'audio à
+  // /api/stt (Whisper) et jusqu'à l'envoi du message. Sans ce verrou, le
+  // minuteur de la boucle réouvrait le micro PENDANT la transcription : un 2e
+  // enregistrement démarrait, partait à son tour, et le bot s'envoyait des
+  // messages en boucle sans que l'utilisateur ait reparlé (le drapeau `turn`
+  // ne protège qu'APRÈS la transcription — trop tard).
+  transcribing: false,
   // AJOUT : une réponse vocale est attendue/en cours pour le tour courant.
   // Indispensable : entre l'affichage de la réponse et le début de la lecture,
   // il y a le temps de la synthèse (quelques centaines de ms) ; sans ce
   // drapeau le minuteur pouvait rouvrir le micro pile pendant cet intervalle
   // → le bot s'entendait parler. Voir aussi awaitingSince (garde-fou).
   awaitingSpeech: false, awaitingSince: 0,
+  // AJOUT — anti-écho : dernière phrase prononcée par le bot. Sert à rejeter
+  // une transcription qui n'est que la voix du bot captée par le micro
+  // (haut-parleur, écho de la pièce). Voir voiceLooksLikeEcho().
+  lastSpoken: "",
   // AJOUT : mode de capture retenu à l'initialisation — « speech » (Web Speech
   // API), « recorder » (MediaRecorder + /api/stt : WebView Android, Firefox)
   // ou « none ». Voir voiceInit().
@@ -2993,6 +3084,38 @@ function voiceCleanText(raw) {
   return s;
 }
 
+/* AJOUT — anti-écho (discussion vocale 🎧).
+   Le micro peut capter la voix du bot sortie du haut-parleur : la
+   transcription n'est alors que la dernière phrase du bot, renvoyée comme si
+   l'utilisateur l'avait dite — d'où un bot qui « se répond à lui-même ».
+   On compare donc la transcription à `voiceState.lastSpoken` (la dernière
+   phrase réellement prononcée par le bot) et on la rejette si c'est la même
+   chose : ≥ 5 mots significatifs, pas plus longue que celle du bot, et ≥ 90 %
+   de ses mots en commun. Un utilisateur qui répond par une phrase plus
+   longue (donc porteuse d'information nouvelle) n'est jamais filtré. */
+function voiceNormWords(s) {
+  return String(s || "")
+    .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    // Apostrophes (droite et typographique) traitées comme des espaces :
+    // sinon « l'écho » ou « aujourd'hui » formeraient des mots qui ne
+    // correspondent plus à rien (et l'anti-écho ne détecterait plus rien).
+    .replace(/[\u2019']/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/).filter((w) => w.length > 2);
+}
+
+function voiceLooksLikeEcho(text, spoken) {
+  const reference = spoken === undefined ? voiceState.lastSpoken : spoken;
+  if (!reference) return false;
+  const A = [...new Set(voiceNormWords(text))];
+  const B = [...new Set(voiceNormWords(reference))];
+  if (A.length < 5 || A.length > B.length) return false;
+  const setB = new Set(B);
+  let common = 0;
+  for (const w of A) if (setB.has(w)) common += 1;
+  return common / A.length >= 0.9;
+}
+
 function voiceRelease() {
   if (voiceState.url) { try { URL.revokeObjectURL(voiceState.url); } catch (e) { /* noop */ } }
   voiceState.audio = null;
@@ -3013,6 +3136,7 @@ async function voiceSpeak(text, opts) {
   const options = opts || {};
   const clean = voiceCleanText(text);
   if (!clean) { voiceState.awaitingSpeech = false; return; } // rien à lire : on libère
+  voiceState.lastSpoken = clean; // AJOUT : référence anti-écho (voir voiceLooksLikeEcho)
   voiceStop();
   const btn = $("#voiceOutBtn");
   try {
@@ -3145,6 +3269,10 @@ function voiceInit() {
   }
 
   let finalText = "";
+  // AJOUT : dernier résultat PROVISOIRE de la reconnaissance. On ne lit plus
+  // jamais le contenu du champ de saisie comme transcription : un brouillon
+  // tapé (ou un reste) ne doit pas être envoyé tout seul par le micro.
+  let voiceInterim = "";
   let phBefore = "";
 
   const setListening = (on) => {
@@ -3173,10 +3301,18 @@ function voiceInit() {
   const VOICE_JUNK_RE = /(sous-titres? r[ée]alis[ée]s? par|amara\.org|merci d'avoir (regard[ée]|[ée]cout[ée])|abonnez-vous|sous-titrage|\[musique\]|\(musique\)|♪|sous-titreur|transcription par)/i;
   let voiceLastText = "";
   let voiceLastCount = 0;
+
+  /* AJOUT — anti-écho : le micro peut capter la voix du bot qui sort du
+     haut-parleur. On compare la transcription à la dernière phrase prononcée
+     par le bot (voiceState.lastSpoken) et on la rejette si c'est la même chose
+     (≥ 5 mots significatifs, pas plus longue que le bot, ≥ 90 % des mots).
+     C'est ce qui évite « le bot se répond à lui-même » quand on n'a PAS
+     d'écouteur. */
   const voiceCheckTranscript = (raw) => {
     const t = String(raw || "").trim();
     if (!t) return "empty";
     if (VOICE_JUNK_RE.test(t)) return "junk";
+    if (voiceLooksLikeEcho(t)) return "echo"; // AJOUT : le micro réentend le bot
     // Même phrase plusieurs fois d'affilée → le micro capte le haut-parleur.
     if (t === voiceLastText) {
       voiceLastCount += 1;
@@ -3202,6 +3338,10 @@ function voiceInit() {
     }
     if (verdict !== "ok") {
       voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
+      // AJOUT : prévenir une fois quand le micro capte la voix du bot.
+      if (verdict === "echo" && voiceState.silentTurns === 1) {
+        toast("🎧 Le micro capte la voix du bot (haut-parleur). Un écouteur rend le tour de parole net.", "error");
+      }
       if (voiceState.autoLoop && voiceState.silentTurns >= 6 && loopStop) {
         loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
       }
@@ -3233,6 +3373,7 @@ function voiceInit() {
     listenStart = () => {
       if (voiceState.listening) return;
       finalText = "";
+      voiceInterim = ""; // AJOUT : nouvelle prise → aucun texte hérité
       try { rec.start(); } catch (e) { /* déjà en cours */ }
     };
     stopListening = () => { if (voiceState.listening) { try { rec.stop(); } catch (e) { /* noop */ } } };
@@ -3247,6 +3388,7 @@ function voiceInit() {
         const alt = e.results[i][0] ? e.results[i][0].transcript : "";
         if (e.results[i].isFinal) finalText += alt; else interim += alt;
       }
+      voiceInterim = interim; // AJOUT : mémorisé hors du champ de saisie
       inputEl.value = (finalText + interim).replace(/^\s+/, "");
       autoResize(inputEl);
     };
@@ -3269,8 +3411,12 @@ function voiceInit() {
     };
     rec.onend = () => {
       setListening(false);
-      const text = (finalText || inputEl.value || "").trim();
+      // AJOUT : la transcription vient UNIQUEMENT de la reconnaissance de ce
+      // tour (final + provisoire) — plus jamais du contenu du champ de saisie
+      // (un brouillon tapé ne doit pas partir tout seul à la place du vocal).
+      const text = (finalText + voiceInterim).trim();
       finalText = "";
+      voiceInterim = "";
       voiceSubmitTranscript(text);
     };
     voiceState.recorder = false;
@@ -3298,18 +3444,21 @@ function voiceInit() {
       chunks = [];
       releaseStream();
       setListening(false);
-      if (!blob.size) return;   // rien capté : le minuteur réarmera si besoin
-      if (loudMs < 250) {
-        // Personne n'a réellement parlé : on n'envoie RIEN. Sans ce garde-fou,
-        // Whisper invente du texte sur le silence (« sous-titres réalisés par… »),
-        // ce texte part comme message et le bot se répond à lui-même sans fin.
-        voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
-        if (wasLoop && voiceState.silentTurns >= 6 && loopStop) {
-          loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
-        }
-        return;
-      }
+      // AJOUT — on verrouille AVANT de partir en réseau : c'est ici que se
+      // jouait la boucle (le minuteur rouvrait le micro pendant Whisper).
+      voiceState.transcribing = true;
       try {
+        if (!blob.size) return;   // rien capté : le minuteur réarmera si besoin
+        if (loudMs < VOICE_MIN_LOUD_MS) {
+          // Personne n'a réellement parlé : on n'envoie RIEN. Sans ce garde-fou,
+          // Whisper invente du texte sur le silence (« sous-titres réalisés par… »),
+          // ce texte part comme message et le bot se répond à lui-même sans fin.
+          voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
+          if (wasLoop && voiceState.silentTurns >= 6 && loopStop) {
+            loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
+          }
+          return;
+        }
         const fd = new FormData();
         fd.append("audio", blob, "voix.webm");
         fd.append("language", "fr");
@@ -3324,6 +3473,10 @@ function voiceInit() {
       } catch (err) {
         toast("🎙️ Transcription impossible : " + (err && err.message ? err.message : err), "error");
         if (wasLoop && loopStop) loopStop("🎧 Discussion vocale arrêtée (transcription indisponible).");
+      } finally {
+        // Déverrouillé seulement maintenant : `voiceSubmitTranscript` a posé
+        // `turn` (qui prend le relais) et `store.sending` est armé.
+        voiceState.transcribing = false;
       }
     };
 
@@ -3352,7 +3505,7 @@ function voiceInit() {
     };
 
     listenStart = async () => {
-      if (voiceState.listening || starting) return;
+      if (voiceState.listening || starting || voiceState.transcribing) return;
       finalText = "";
       loudMs = 0;
       starting = true;
@@ -3414,6 +3567,7 @@ function voiceInit() {
   loopStop = (message, type) => {
     voiceState.autoLoop = false;
     voiceState.silentTurns = 0;
+    voiceState.lastSpoken = ""; // AJOUT : plus de référence anti-écho hors discussion
     renderLoopBtn();
     if (voiceState.listening) stopListening();
     voiceStop();
@@ -3449,6 +3603,9 @@ function voiceInit() {
      rester bloqué (réseau lent, erreur…). */
   setInterval(() => {
     if (!voiceState.autoLoop || voiceState.listening) return;
+    // AJOUT : jamais de nouveau micro tant que la transcription Whisper du tour
+    // précédent n'est pas terminée (c'est LA cause de la boucle d'envois).
+    if (voiceState.transcribing) return;
     // On attend que le bot ait FINI de parler : soit l'audio joue, soit sa
     // synthèse est encore en cours (awaitingSpeech). Passé 30 s sans voix,
     // on considère qu'elle ne viendra pas et on reprend la parole.
@@ -3463,7 +3620,9 @@ function voiceInit() {
       voiceState.turn = null;
     }
     if (store.sending) return;
-    if (Date.now() - (voiceState.since || 0) < 400) return;
+    // AJOUT : délai plus long après la fin de la lecture du bot (écho de la
+    // pièce / latence du haut-parleur) — 900 ms au lieu de 400 ms.
+    if (Date.now() - (voiceState.since || 0) < 900) return;
     listenStart();
   }, 700);
 
