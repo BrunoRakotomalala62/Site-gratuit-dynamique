@@ -2983,6 +2983,8 @@ window.Lumina = {
   resolveSendImages, rememberedImages, clearImageMemory, clearFigureMemory,
   renderImageMemoryPill, svgToPngDataUri, rememberFigure, detectFigureRemark,
   renderMarkdown,
+  // AJOUT — exposés pour les tests du tour de parole (anti-écho)
+  voiceCleanText, voiceNormWords, voiceLooksLikeEcho,
 };
 
 // Affichage des erreurs JS (débogage à distance)
@@ -3028,6 +3030,10 @@ const voiceState = {
   // drapeau le minuteur pouvait rouvrir le micro pile pendant cet intervalle
   // → le bot s'entendait parler. Voir aussi awaitingSince (garde-fou).
   awaitingSpeech: false, awaitingSince: 0,
+  // AJOUT — anti-écho : dernière phrase prononcée par le bot. Sert à rejeter
+  // une transcription qui n'est que la voix du bot captée par le micro
+  // (haut-parleur, écho de la pièce). Voir voiceLooksLikeEcho().
+  lastSpoken: "",
   // AJOUT : mode de capture retenu à l'initialisation — « speech » (Web Speech
   // API), « recorder » (MediaRecorder + /api/stt : WebView Android, Firefox)
   // ou « none ». Voir voiceInit().
@@ -3067,6 +3073,38 @@ function voiceCleanText(raw) {
   return s;
 }
 
+/* AJOUT — anti-écho (discussion vocale 🎧).
+   Le micro peut capter la voix du bot sortie du haut-parleur : la
+   transcription n'est alors que la dernière phrase du bot, renvoyée comme si
+   l'utilisateur l'avait dite — d'où un bot qui « se répond à lui-même ».
+   On compare donc la transcription à `voiceState.lastSpoken` (la dernière
+   phrase réellement prononcée par le bot) et on la rejette si c'est la même
+   chose : ≥ 5 mots significatifs, pas plus longue que celle du bot, et ≥ 90 %
+   de ses mots en commun. Un utilisateur qui répond par une phrase plus
+   longue (donc porteuse d'information nouvelle) n'est jamais filtré. */
+function voiceNormWords(s) {
+  return String(s || "")
+    .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    // Apostrophes (droite et typographique) traitées comme des espaces :
+    // sinon « l'écho » ou « aujourd'hui » formeraient des mots qui ne
+    // correspondent plus à rien (et l'anti-écho ne détecterait plus rien).
+    .replace(/[\u2019']/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/).filter((w) => w.length > 2);
+}
+
+function voiceLooksLikeEcho(text, spoken) {
+  const reference = spoken === undefined ? voiceState.lastSpoken : spoken;
+  if (!reference) return false;
+  const A = [...new Set(voiceNormWords(text))];
+  const B = [...new Set(voiceNormWords(reference))];
+  if (A.length < 5 || A.length > B.length) return false;
+  const setB = new Set(B);
+  let common = 0;
+  for (const w of A) if (setB.has(w)) common += 1;
+  return common / A.length >= 0.9;
+}
+
 function voiceRelease() {
   if (voiceState.url) { try { URL.revokeObjectURL(voiceState.url); } catch (e) { /* noop */ } }
   voiceState.audio = null;
@@ -3087,6 +3125,7 @@ async function voiceSpeak(text, opts) {
   const options = opts || {};
   const clean = voiceCleanText(text);
   if (!clean) { voiceState.awaitingSpeech = false; return; } // rien à lire : on libère
+  voiceState.lastSpoken = clean; // AJOUT : référence anti-écho (voir voiceLooksLikeEcho)
   voiceStop();
   const btn = $("#voiceOutBtn");
   try {
@@ -3219,6 +3258,10 @@ function voiceInit() {
   }
 
   let finalText = "";
+  // AJOUT : dernier résultat PROVISOIRE de la reconnaissance. On ne lit plus
+  // jamais le contenu du champ de saisie comme transcription : un brouillon
+  // tapé (ou un reste) ne doit pas être envoyé tout seul par le micro.
+  let voiceInterim = "";
   let phBefore = "";
 
   const setListening = (on) => {
@@ -3247,10 +3290,18 @@ function voiceInit() {
   const VOICE_JUNK_RE = /(sous-titres? r[ée]alis[ée]s? par|amara\.org|merci d'avoir (regard[ée]|[ée]cout[ée])|abonnez-vous|sous-titrage|\[musique\]|\(musique\)|♪|sous-titreur|transcription par)/i;
   let voiceLastText = "";
   let voiceLastCount = 0;
+
+  /* AJOUT — anti-écho : le micro peut capter la voix du bot qui sort du
+     haut-parleur. On compare la transcription à la dernière phrase prononcée
+     par le bot (voiceState.lastSpoken) et on la rejette si c'est la même chose
+     (≥ 5 mots significatifs, pas plus longue que le bot, ≥ 90 % des mots).
+     C'est ce qui évite « le bot se répond à lui-même » quand on n'a PAS
+     d'écouteur. */
   const voiceCheckTranscript = (raw) => {
     const t = String(raw || "").trim();
     if (!t) return "empty";
     if (VOICE_JUNK_RE.test(t)) return "junk";
+    if (voiceLooksLikeEcho(t)) return "echo"; // AJOUT : le micro réentend le bot
     // Même phrase plusieurs fois d'affilée → le micro capte le haut-parleur.
     if (t === voiceLastText) {
       voiceLastCount += 1;
@@ -3276,6 +3327,10 @@ function voiceInit() {
     }
     if (verdict !== "ok") {
       voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
+      // AJOUT : prévenir une fois quand le micro capte la voix du bot.
+      if (verdict === "echo" && voiceState.silentTurns === 1) {
+        toast("🎧 Le micro capte la voix du bot (haut-parleur). Un écouteur rend le tour de parole net.", "error");
+      }
       if (voiceState.autoLoop && voiceState.silentTurns >= 6 && loopStop) {
         loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
       }
@@ -3307,6 +3362,7 @@ function voiceInit() {
     listenStart = () => {
       if (voiceState.listening) return;
       finalText = "";
+      voiceInterim = ""; // AJOUT : nouvelle prise → aucun texte hérité
       try { rec.start(); } catch (e) { /* déjà en cours */ }
     };
     stopListening = () => { if (voiceState.listening) { try { rec.stop(); } catch (e) { /* noop */ } } };
@@ -3321,6 +3377,7 @@ function voiceInit() {
         const alt = e.results[i][0] ? e.results[i][0].transcript : "";
         if (e.results[i].isFinal) finalText += alt; else interim += alt;
       }
+      voiceInterim = interim; // AJOUT : mémorisé hors du champ de saisie
       inputEl.value = (finalText + interim).replace(/^\s+/, "");
       autoResize(inputEl);
     };
@@ -3343,8 +3400,12 @@ function voiceInit() {
     };
     rec.onend = () => {
       setListening(false);
-      const text = (finalText || inputEl.value || "").trim();
+      // AJOUT : la transcription vient UNIQUEMENT de la reconnaissance de ce
+      // tour (final + provisoire) — plus jamais du contenu du champ de saisie
+      // (un brouillon tapé ne doit pas partir tout seul à la place du vocal).
+      const text = (finalText + voiceInterim).trim();
       finalText = "";
+      voiceInterim = "";
       voiceSubmitTranscript(text);
     };
     voiceState.recorder = false;
@@ -3488,6 +3549,7 @@ function voiceInit() {
   loopStop = (message, type) => {
     voiceState.autoLoop = false;
     voiceState.silentTurns = 0;
+    voiceState.lastSpoken = ""; // AJOUT : plus de référence anti-écho hors discussion
     renderLoopBtn();
     if (voiceState.listening) stopListening();
     voiceStop();
@@ -3537,7 +3599,9 @@ function voiceInit() {
       voiceState.turn = null;
     }
     if (store.sending) return;
-    if (Date.now() - (voiceState.since || 0) < 400) return;
+    // AJOUT : délai plus long après la fin de la lecture du bot (écho de la
+    // pièce / latence du haut-parleur) — 900 ms au lieu de 400 ms.
+    if (Date.now() - (voiceState.since || 0) < 900) return;
     listenStart();
   }, 700);
 

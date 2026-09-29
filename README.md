@@ -320,12 +320,21 @@ styles.css      → thème premium (glassmorphism, animations, responsive, bloc 
 app.js          → logique (API, modèles, historique, pièces jointes, markdown, figures, mode vocal)
 api/image-edit.js     → (ajout) fonction Vercel : édition d'image Magic Hour (clé côté serveur)
 test-figures.js → tests unitaires de la détection des figures (node test-figures.js)
+test-voice-loop.js     → (ajout) tests du tour de parole vocal 🎧 — anti-écho (node test-voice-loop.js)
 test-image-edit.js    → (ajout) tests hors ligne de /api/image-edit (node test-image-edit.js)
 vercel.json     → configuration Vercel (headers + cleanUrls + maxDuration de la fonction)
 ```
 
 ## 🧪 Tests API effectués
 
+- ✅ **Tour de parole vocal 🎧 — anti-écho** — `node test-voice-loop.js` : **15/15**
+  sans navigateur ni micro. Couvre la cause du « le bot répond puis envoie
+  n'importe quoi tout seul » : le micro capte la voix du bot (haut-parleur) et
+  sa propre phrase revient comme question. Le filtre compare la transcription à
+  la dernière phrase prononcée par le bot (≥ 5 mots, ≥ 90 % en commun, pas plus
+  longue) et la **rejette** ; une vraie réponse (plus longue, ou différente)
+  n'est jamais filtrée. Vérifie aussi que le champ de saisie n'est **plus** lu
+  comme transcription et que le délai de réarmement est de 900 ms.
 - ✅ **Édition d'image Magic Hour** — `node test-image-edit.js` : **17/17** hors ligne
   (mode `IMAGE_EDIT_MOCK=1`, sans clé ni réseau) : modèles gratuits, édition data URL
   et URL publique, mode asynchrone (`wait:false`), lecture de statut, validations
