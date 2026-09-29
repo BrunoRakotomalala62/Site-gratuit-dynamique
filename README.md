@@ -327,14 +327,16 @@ vercel.json     → configuration Vercel (headers + cleanUrls + maxDuration de l
 
 ## 🧪 Tests API effectués
 
-- ✅ **Tour de parole vocal 🎧 — anti-écho** — `node test-voice-loop.js` : **15/15**
+- ✅ **Tour de parole vocal 🎧 — anti-écho** — `node test-voice-loop.js` : **17/17**
   sans navigateur ni micro. Couvre la cause du « le bot répond puis envoie
-  n'importe quoi tout seul » : le micro capte la voix du bot (haut-parleur) et
-  sa propre phrase revient comme question. Le filtre compare la transcription à
-  la dernière phrase prononcée par le bot (≥ 5 mots, ≥ 90 % en commun, pas plus
-  longue) et la **rejette** ; une vraie réponse (plus longue, ou différente)
-  n'est jamais filtrée. Vérifie aussi que le champ de saisie n'est **plus** lu
-  comme transcription et que le délai de réarmement est de 900 ms.
+  n'importe quoi tout seul, en boucle ». Deux mécanismes sont verrouillés :
+  **(1)** le micro ne se rouvre plus tant que la transcription Whisper du tour
+  précédent n'est pas terminée (verrou `transcribing`) — sans lui, un 2ᵉ
+  enregistrement partait pendant l'attente et envoyait un message de plus, en
+  boucle ; **(2)** le filtre anti-écho compare la transcription à la dernière
+  phrase prononcée par le bot (≥ 5 mots, ≥ 90 % communs, pas plus longue) et la
+  **rejette**. Vérifie aussi que le champ de saisie n'est **plus** lu comme
+  transcription, le seuil de parole relevé, et le délai de réarmement à 900 ms.
 - ✅ **Édition d'image Magic Hour** — `node test-image-edit.js` : **17/17** hors ligne
   (mode `IMAGE_EDIT_MOCK=1`, sans clé ni réseau) : modèles gratuits, édition data URL
   et URL publique, mode asynchrone (`wait:false`), lecture de statut, validations

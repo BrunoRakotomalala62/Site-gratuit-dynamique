@@ -3014,6 +3014,10 @@ const VOICE_NAME_KEY = "lumina.voice.name.v1";
 const VOICE_NAME = "fr-FR-DeniseNeural";  // voix par défaut (voir /api/voices)
 const VOICE_MAX_CHARS = 700;              // longueur lue (coupée à la phrase)
 const VOICE_ERROR_COOLDOWN = 12000;       // anti-spam des messages d'erreur
+/* AJOUT — durée minimale de son au-dessus du seuil pour considérer qu'une
+   personne a vraiment parlé (mode enregistreur). Trop bas, Whisper transcrit
+   du bruit et invente du texte ; trop haut, une voix douce serait ignorée. */
+const VOICE_MIN_LOUD_MS = 400;
 
 const voiceState = {
   enabled: false, listening: false, voice: VOICE_NAME,
@@ -3024,6 +3028,13 @@ const voiceState = {
   // nouvelle réponse apparaisse (et que la lecture vocale soit finie) avant de
   // rouvrir le micro : c'est ce qui évite d'écouter le bot se répondre à lui-même.
   autoLoop: false, turn: null, since: 0, silentTurns: 0,
+  // AJOUT — VERROU DE TRANSCRIPTION. Vrai pendant l'envoi de l'audio à
+  // /api/stt (Whisper) et jusqu'à l'envoi du message. Sans ce verrou, le
+  // minuteur de la boucle réouvrait le micro PENDANT la transcription : un 2e
+  // enregistrement démarrait, partait à son tour, et le bot s'envoyait des
+  // messages en boucle sans que l'utilisateur ait reparlé (le drapeau `turn`
+  // ne protège qu'APRÈS la transcription — trop tard).
+  transcribing: false,
   // AJOUT : une réponse vocale est attendue/en cours pour le tour courant.
   // Indispensable : entre l'affichage de la réponse et le début de la lecture,
   // il y a le temps de la synthèse (quelques centaines de ms) ; sans ce
@@ -3433,18 +3444,21 @@ function voiceInit() {
       chunks = [];
       releaseStream();
       setListening(false);
-      if (!blob.size) return;   // rien capté : le minuteur réarmera si besoin
-      if (loudMs < 250) {
-        // Personne n'a réellement parlé : on n'envoie RIEN. Sans ce garde-fou,
-        // Whisper invente du texte sur le silence (« sous-titres réalisés par… »),
-        // ce texte part comme message et le bot se répond à lui-même sans fin.
-        voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
-        if (wasLoop && voiceState.silentTurns >= 6 && loopStop) {
-          loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
-        }
-        return;
-      }
+      // AJOUT — on verrouille AVANT de partir en réseau : c'est ici que se
+      // jouait la boucle (le minuteur rouvrait le micro pendant Whisper).
+      voiceState.transcribing = true;
       try {
+        if (!blob.size) return;   // rien capté : le minuteur réarmera si besoin
+        if (loudMs < VOICE_MIN_LOUD_MS) {
+          // Personne n'a réellement parlé : on n'envoie RIEN. Sans ce garde-fou,
+          // Whisper invente du texte sur le silence (« sous-titres réalisés par… »),
+          // ce texte part comme message et le bot se répond à lui-même sans fin.
+          voiceState.silentTurns = (voiceState.silentTurns || 0) + 1;
+          if (wasLoop && voiceState.silentTurns >= 6 && loopStop) {
+            loopStop("🎧 Aucune parole détectée — discussion vocale arrêtée.", "success");
+          }
+          return;
+        }
         const fd = new FormData();
         fd.append("audio", blob, "voix.webm");
         fd.append("language", "fr");
@@ -3459,6 +3473,10 @@ function voiceInit() {
       } catch (err) {
         toast("🎙️ Transcription impossible : " + (err && err.message ? err.message : err), "error");
         if (wasLoop && loopStop) loopStop("🎧 Discussion vocale arrêtée (transcription indisponible).");
+      } finally {
+        // Déverrouillé seulement maintenant : `voiceSubmitTranscript` a posé
+        // `turn` (qui prend le relais) et `store.sending` est armé.
+        voiceState.transcribing = false;
       }
     };
 
@@ -3487,7 +3505,7 @@ function voiceInit() {
     };
 
     listenStart = async () => {
-      if (voiceState.listening || starting) return;
+      if (voiceState.listening || starting || voiceState.transcribing) return;
       finalText = "";
       loudMs = 0;
       starting = true;
@@ -3585,6 +3603,9 @@ function voiceInit() {
      rester bloqué (réseau lent, erreur…). */
   setInterval(() => {
     if (!voiceState.autoLoop || voiceState.listening) return;
+    // AJOUT : jamais de nouveau micro tant que la transcription Whisper du tour
+    // précédent n'est pas terminée (c'est LA cause de la boucle d'envois).
+    if (voiceState.transcribing) return;
     // On attend que le bot ait FINI de parler : soit l'audio joue, soit sa
     // synthèse est encore en cours (awaitingSpeech). Passé 30 s sans voix,
     // on considère qu'elle ne viendra pas et on reprend la parole.

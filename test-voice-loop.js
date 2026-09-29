@@ -145,6 +145,19 @@ test("la dernière phrase du bot est mémorisée pour l'anti-écho", () => {
   assert(/voiceLooksLikeEcho\(t\)\) return "echo";/.test(SOURCE), "le verdict « echo » n'est pas branché");
   ok("la dernière phrase du bot est mémorisée pour l'anti-écho");
 });
+test("verrou de transcription : pas de 2e micro pendant Whisper", () => {
+  assert(/voiceState\.transcribing = true;/.test(SOURCE), "le verrou n'est jamais posé");
+  assert(/voiceState\.transcribing = false;/.test(SOURCE), "le verrou n'est jamais levé");
+  assert(/if \(voiceState\.transcribing\) return;/.test(SOURCE), "le minuteur de la boucle ignore le verrou");
+  assert(/voiceState\.listening \|\| starting \|\| voiceState\.transcribing/.test(SOURCE), "listenStart ignore le verrou");
+  ok("verrou de transcription : pas de 2e micro pendant Whisper");
+});
+test("seuil de parole relevé (moins de Whisper sur du bruit)", () => {
+  assert(/const VOICE_MIN_LOUD_MS = \d+;/.test(SOURCE), "VOICE_MIN_LOUD_MS non défini");
+  assert(/loudMs < VOICE_MIN_LOUD_MS/.test(SOURCE), "l'ancien seuil magique est encore utilisé");
+  assert(!/loudMs < 250/.test(SOURCE), "seuil 250 ms encore présent");
+  ok("seuil de parole relevé (moins de Whisper sur du bruit)");
+});
 
 console.log(`\n${BOLD}Bilan${RESET}: ${GREEN}${passed} réussis${RESET}, ${failed ? RED : DIM}${failed} échoués${RESET}`);
 if (failed) console.log(`${RED}Échecs :${RESET} ${failures.join(", ")}`);
