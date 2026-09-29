@@ -132,6 +132,9 @@
       <div class="more-title">🎨 Images</div>
       <button id="genBtn" class="more-item" type="button" aria-label="Générer une image"><span class="more-ico">🎨</span><span class="more-txt">Générer une image</span></button>
       <button id="editImgBtn" class="more-item" type="button" aria-label="Modifier l'image jointe" hidden><span class="more-ico">🖌️</span><span class="more-txt">Modifier l'image jointe</span></button>
+      <!-- AJOUT : modification via Magic Hour (nouvelle route /api/image-edit, gratuite).
+           Le bouton « Modifier l'image jointe » (ChatiPro) ci-dessus reste inchangé. -->
+      <button id="editMhBtn" class="more-item" type="button" aria-label="Modifier l'image jointe avec Magic Hour (gratuit)" hidden><span class="more-ico">✨</span><span class="more-txt">Modifier · Magic Hour <em>gratuit</em></span></button>
 
       <div class="more-title">🎙️ Voix</div>
       <button id="micBtn" class="more-item" type="button" aria-label="Dicter un message" aria-pressed="false"><span class="more-ico">🎤</span><span class="more-txt">Dicter un message</span></button>
@@ -199,6 +202,6 @@
   </div>
 </div>
 
-<script src="app.js?v=46"></script>
+<script src="app.js?v=47"></script>
 </body>
 </html>
