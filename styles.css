@@ -1186,3 +1186,29 @@ body {
   0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.4); }
   50%      { box-shadow: 0 0 0 7px rgba(74, 222, 128, 0); }
 }
+
+/* ===== AJOUT : champ « code secret » de la modale CodeCraft PRO ===== */
+.code-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  border-radius: 11px;
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary, #f5f6ff);
+  font-family: var(--font-body, inherit);
+  font-size: 15px;
+  letter-spacing: 3px;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+.code-input::placeholder { letter-spacing: normal; color: var(--text-secondary, #9aa0b5); }
+.code-input:focus {
+  border-color: rgba(167, 139, 250, 0.95);
+  background: rgba(255, 255, 255, 0.1);
+}
+.code-ok {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+}

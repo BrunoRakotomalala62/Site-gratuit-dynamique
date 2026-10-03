@@ -26,6 +26,83 @@ const API_PLOT_URL = `${API_BASE}/api/plot`; // figures : courbes (expression=) 
    Chat texte + vision (image_url ou upload data URL via POST). */
 const API_BASE_LUMO = "https://l-umoprotonme.vercel.app";
 const API_URL_LUMO = `${API_BASE_LUMO}/api/chat`;
+/* AJOUT — CodeCraft API (premium_rest.vercel.app) : les 33 modèles de
+   l'API CodeCraft, regroupés sous « CodeCraft PRO 🔒 » dans le menu.
+   Choisir l'un d'eux demande le CODE SECRET (CODECRAFT_SECRET_CODE) ; une
+   fois validé pour la session, le modèle est routé vers API_URL_CODECRAFT.
+   Les valeurs sont préfixées « cc: » pour ne PAS entrer en conflit avec les
+   modèles existants (ex. gpt-5.6-luna, gpt-5.6-terra). */
+const API_URL_CODECRAFT = "https://premiumrest.vercel.app/api/ai";
+const CODECRAFT_SECRET_CODE = "258";
+const CODECRAFT_VISION_DEFAULT = "claude-opus-5"; // id CodeCraft (sans préfixe)
+const CODECRAFT_MODELS = new Set([
+  "cc:muse-spark-1.1",
+  "cc:gemma-2-2b",
+  "cc:gpt-5.6-sol",
+  "cc:claude-opus-5",
+  "cc:claude-fable-5",
+  "cc:claude-mythos-preview",
+  "cc:kimi-k3",
+  "cc:glm-5.3",
+  "cc:deepseek-v4-pro-0813",
+  "cc:qwen3.8-max",
+  "cc:gpt-5.6-terra",
+  "cc:claude-opus-4.8",
+  "cc:gemini-3.7-flash",
+  "cc:claude-sonnet-5",
+  "cc:gpt-5.5",
+  "cc:grok-4.5",
+  "cc:deepseek-v4-flash-0731",
+  "cc:grok-4.6",
+  "cc:seed-2.1-pro",
+  "cc:glm-5.2",
+  "cc:qwen3.8-27b",
+  "cc:gpt-5.6-luna",
+  "cc:qwen3.7-max",
+  "cc:claude-opus-4.6",
+  "cc:gpt-5.5-pro",
+  "cc:claude-opus-4.7",
+  "cc:gemini-3.6-flash",
+  "cc:kimi-k2.6",
+  "cc:seed-2.1-turbo",
+  "cc:gemini-3.1-pro",
+  "cc:deepseek-v4-pro-max",
+  "cc:claude-fable-5.1",
+  "cc:claude-opus-5.5",
+]);
+const CODECRAFT_VISION_MODELS = new Set([
+  "cc:muse-spark-1.1",
+  "cc:gpt-5.6-sol",
+  "cc:claude-opus-5",
+  "cc:claude-fable-5",
+  "cc:claude-mythos-preview",
+  "cc:kimi-k3",
+  "cc:glm-5.3",
+  "cc:qwen3.8-max",
+  "cc:gpt-5.6-terra",
+  "cc:claude-opus-4.8",
+  "cc:gemini-3.7-flash",
+  "cc:claude-sonnet-5",
+  "cc:gpt-5.5",
+  "cc:grok-4.5",
+  "cc:grok-4.6",
+  "cc:seed-2.1-pro",
+  "cc:glm-5.2",
+  "cc:gpt-5.6-luna",
+  "cc:qwen3.7-max",
+  "cc:claude-opus-4.6",
+  "cc:gpt-5.5-pro",
+  "cc:claude-opus-4.7",
+  "cc:gemini-3.6-flash",
+  "cc:kimi-k2.6",
+  "cc:seed-2.1-turbo",
+  "cc:gemini-3.1-pro",
+  "cc:claude-fable-5.1",
+  "cc:claude-opus-5.5",
+]);
+let codeCraftUnlocked = false;
+let lastGoodModel = null;
+
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const LANG = "fr";
 const MAX_IMAGES = 4;
@@ -78,6 +155,41 @@ const MODELS = {
   "Réservés PRO 🔒": [
     ["gpt-5.6-terra", "gpt-5.6-terra (PRO)"],
     ["gpt-4o", "gpt-4o (PRO)"],
+  ],
+  "CodeCraft PRO 🔒": [
+    ["cc:muse-spark-1.1", "Muse Spark 1.1 👁️ 🔒"],
+    ["cc:gemma-2-2b", "Gemma 2 2B 🔒"],
+    ["cc:gpt-5.6-sol", "GPT-5.6 Sol 👁️ 🔒"],
+    ["cc:claude-opus-5", "Claude Opus 5 👁️ 🔒"],
+    ["cc:claude-fable-5", "Claude Fable 5 👁️ 🔒"],
+    ["cc:claude-mythos-preview", "Claude Mythos Preview 👁️ 🔒"],
+    ["cc:kimi-k3", "Kimi K3 👁️ 🔒"],
+    ["cc:glm-5.3", "GLM-5.3 👁️ 🔒"],
+    ["cc:deepseek-v4-pro-0813", "DeepSeek-V4-Pro-0813 🔒"],
+    ["cc:qwen3.8-max", "Qwen3.8 Max 👁️ 🔒"],
+    ["cc:gpt-5.6-terra", "GPT-5.6 Terra 👁️ 🔒"],
+    ["cc:claude-opus-4.8", "Claude Opus 4.8 👁️ 🔒"],
+    ["cc:gemini-3.7-flash", "Gemini 3.7 Flash 👁️ 🔒"],
+    ["cc:claude-sonnet-5", "Claude Sonnet 5 👁️ 🔒"],
+    ["cc:gpt-5.5", "GPT-5.5 👁️ 🔒"],
+    ["cc:grok-4.5", "Grok 4.5 👁️ 🔒"],
+    ["cc:deepseek-v4-flash-0731", "DeepSeek-V4-Flash-0731 🔒"],
+    ["cc:grok-4.6", "Grok 4.6 👁️ 🔒"],
+    ["cc:seed-2.1-pro", "Seed 2.1 Pro 👁️ 🔒"],
+    ["cc:glm-5.2", "GLM-5.2 👁️ 🔒"],
+    ["cc:qwen3.8-27b", "Qwen3.8-27B 🔒"],
+    ["cc:gpt-5.6-luna", "GPT-5.6 Luna 👁️ 🔒"],
+    ["cc:qwen3.7-max", "Qwen3.7 Max 👁️ 🔒"],
+    ["cc:claude-opus-4.6", "Claude Opus 4.6 👁️ 🔒"],
+    ["cc:gpt-5.5-pro", "GPT-5.5 Pro 👁️ 🔒"],
+    ["cc:claude-opus-4.7", "Claude Opus 4.7 👁️ 🔒"],
+    ["cc:gemini-3.6-flash", "Gemini 3.6 Flash 👁️ 🔒"],
+    ["cc:kimi-k2.6", "Kimi K2.6 👁️ 🔒"],
+    ["cc:seed-2.1-turbo", "Seed 2.1 Turbo 👁️ 🔒"],
+    ["cc:gemini-3.1-pro", "Gemini 3.1 Pro 👁️ 🔒"],
+    ["cc:deepseek-v4-pro-max", "DeepSeek-V4-Pro-Max 🔒"],
+    ["cc:claude-fable-5.1", "Claude Fable 5.1 👁️ 🔒"],
+    ["cc:claude-opus-5.5", "Claude Opus 5.5 👁️ 🔒"],
   ],
 };
 const PRO_MODELS = new Set(["gpt-5.6-terra", "gpt-4o"]);
@@ -1329,6 +1441,89 @@ function closeConfirmDialog() {
   confirmCallback = null;
 }
 
+/* ============================================================
+   AJOUT — CodeCraft PRO : code secret + déblocage
+   ------------------------------------------------------------
+   Bloc 100 % additif : aucune fonction existante n'est modifiée.
+   ============================================================ */
+
+/** Pastille PRO sur le bouton quand un modèle CodeCraft est sélectionné. */
+function markCodeCraftSelected() {
+  const btn = $("#modelSelectBtn");
+  const sel = $("#modelSelect");
+  if (btn && sel) btn.classList.toggle("pro-selected", CODECRAFT_MODELS.has(sel.value));
+}
+
+/** Mémorise le déblocage pour la session (survit à un rechargement). */
+function unlockCodeCraft() {
+  codeCraftUnlocked = true;
+  try { sessionStorage.setItem("cc.premium", "1"); } catch (e) { /* noop */ }
+  const sel = $("#modelSelect");
+  if (sel) lastGoodModel = sel.value;
+  markCodeCraftSelected();
+}
+
+/** Revient au dernier modèle autorisé quand le code est refusé. */
+function revertCodeCraftModel(prev) {
+  const sel = $("#modelSelect");
+  if (!sel) return;
+  const safe = prev || DEFAULT_MODEL;
+  sel.value = safe;
+  sel.dataset.prevModel = safe;
+  lastGoodModel = safe;
+  updateModelPill();
+  const conv = getConversation(store.activeId);
+  if (conv) { conv.model = safe; saveHistory(); renderHistory(); }
+  if (!IMAGE_MODELS.has(safe)) store.lastChatModel = safe;
+  markCodeCraftSelected();
+}
+
+/* Modale de saisie du code secret (remplace window.prompt, bloqué dans
+   certaines WebViews Android). */
+let codeModalResolver = null;
+function initCodeModal() {
+  const modal = $("#codeModal");
+  if (!modal) return;
+  const input = $("#codeInput");
+  const submit = () => {
+    if ((input.value || "").trim() === CODECRAFT_SECRET_CODE) {
+      closeCodeModal(true);
+    } else {
+      toast("Code incorrect.", "error");
+      input.value = "";
+      input.focus();
+    }
+  };
+  const okBtn = $("#codeOk");
+  const cancelBtn = $("#codeCancel");
+  const overlay = $("#codeOverlay");
+  if (okBtn) okBtn.addEventListener("click", submit);
+  if (cancelBtn) cancelBtn.addEventListener("click", () => closeCodeModal(false));
+  if (overlay) overlay.addEventListener("click", () => closeCodeModal(false));
+  if (input) input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); submit(); }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.hidden) closeCodeModal(false);
+  });
+}
+function askSecretCode(cb) {
+  const modal = $("#codeModal");
+  if (!modal) { cb(false); return; }
+  const input = $("#codeInput");
+  if (input) input.value = "";
+  modal.hidden = false;
+  codeModalResolver = cb;
+  if (input) setTimeout(() => input.focus(), 40);
+}
+function closeCodeModal(result) {
+  const modal = $("#codeModal");
+  if (modal) modal.hidden = true;
+  const cb = codeModalResolver;
+  codeModalResolver = null;
+  if (cb) cb(result);
+}
+
 /* ---------- Suppression de TOUTES les conversations ----------
    Bouton du menu hamburger. Réutilise uniquement la logique existante
    (saveHistory / renderConversation / renderHistory / closeSidebar) :
@@ -1963,6 +2158,16 @@ async function callApi(text, attachments, modelOverride, convCtx) {
   // Vision (image jointe) : modèle compatible image si le modèle texte
   // choisi en fait partie ; sinon repli sur le sélecteur vision dédié.
   let model = modelOverride || currentModel();
+  // AJOUT — CodeCraft (premium) : flux dédié (premium_rest gère la continuité
+  // par uid). Placé avant le repli vision pour ne pas écraser le modèle choisi.
+  if (CODECRAFT_MODELS.has(model)) {
+    // Verrou de sécurité : si le code n'a pas été validé (ex. modèle restauré
+    // d'une conversation), on bloque l'appel au lieu de consommer l'API.
+    if (!codeCraftUnlocked) {
+      throw new Error("Modèle CodeCraft verrouillé — resélectionnez-le pour saisir le code secret.");
+    }
+    return await callCodeCraftApi(text, attachments, model, convCtx);
+  }
   // Vision : on respecte le modèle choisi par l'utilisateur s'il est
   // compatible image ; sinon repli sur le sélecteur vision dédié.
   if (hasImages && !VISION_MODELS.has(model)) model = visionModel();
@@ -2084,6 +2289,68 @@ async function callApi(text, attachments, modelOverride, convCtx) {
   } catch (err) {
     if (err.name === "AbortError") {
       throw new Error("Délai d'attente dépassé (90 s). L'API est peut-être surchargée.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ---------- AJOUT : CodeCraft (premium_rest) ----------
+   Chat + vision via https://premiumrest.vercel.app/api/ai (Edge Functions).
+   POST JSON (comme les autres backends du site) → aucune limite d'URL avec
+   les images. La continuité est gérée côté serveur (mémoire par uid), et
+   history/reset sont aussi transmis pour être robuste. */
+async function callCodeCraftApi(text, attachments, model, convCtx) {
+  const hasImages = (attachments || []).length > 0;
+  const realModel = String(model).replace(/^cc:/, "");
+  // Modèle CodeCraft sans vision + image jointe → repli sur un modèle CodeCraft
+  // compatible image (on reste dans l'offre premium).
+  const useModel = (hasImages && !CODECRAFT_VISION_MODELS.has(model))
+    ? CODECRAFT_VISION_DEFAULT
+    : realModel;
+
+  // uid par conversation : chaque fil garde sa propre mémoire côté serveur.
+  const uid = `${store.uid || "anon"}::${store.activeId || "default"}`;
+  const promptText = (text || "").trim().slice(0, 4000);
+  const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST).map((a) => a.value);
+
+  const body = { prompt: promptText, model: useModel, uid };
+  if (imgs.length) body.images = imgs;
+  if (convCtx && convCtx.reset) {
+    body.reset = 1;
+  } else if (convCtx && Array.isArray(convCtx.history) && convCtx.history.length) {
+    // convCtx.history est au format [{q, a}] (chat-free-gpt) → conversion au
+    // format OpenAI attendu par premium_rest.
+    body.history = convCtx.history.flatMap((e) => (
+      e && e.q && e.a
+        ? [{ role: "user", content: e.q }, { role: "assistant", content: e.a }]
+        : []
+    ));
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90000);
+  try {
+    const res = await fetch(API_URL_CODECRAFT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* corps non JSON */ }
+    if (!data || typeof data !== "object") {
+      throw new Error(`Réponse invalide (HTTP ${res.status})`);
+    }
+    if (!res.ok || data.ok === false) {
+      const msg = (data.error && (data.error.message || data.error.code)) || `Erreur HTTP ${res.status}`;
+      return { success: false, error: msg, model: data.model || useModel };
+    }
+    return { success: true, reply: data.reply, model: data.model || useModel, usage: data.usage };
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error("Délai d'attente dépassé (90 s). L'API CodeCraft est peut-être surchargée.");
     }
     throw err;
   } finally {
@@ -2696,6 +2963,13 @@ function init() {
   updateModelPill();
   loadVisionModel();
 
+  // AJOUT — CodeCraft : restaure l'état débloqué + branche la modale code.
+  try { codeCraftUnlocked = sessionStorage.getItem("cc.premium") === "1"; }
+  catch (e) { codeCraftUnlocked = false; }
+  lastGoodModel = currentModel();
+  initCodeModal();
+  if (codeCraftUnlocked) markCodeCraftSelected();
+
   // si une conversation active existait, la charger
   if (store.activeId && getConversation(store.activeId)) {
     const conv = getConversation(store.activeId);
@@ -2704,6 +2978,14 @@ function init() {
       updateModelPill();
     }
   }
+
+  // AJOUT — CodeCraft : un modèle premium restauré sans code est ramené au
+  // modèle par défaut (le code reste requis à chaque nouvelle session).
+  if (CODECRAFT_MODELS.has(currentModel()) && !codeCraftUnlocked) {
+    $("#modelSelect").value = DEFAULT_MODEL;
+    updateModelPill();
+  }
+  lastGoodModel = currentModel();
 
   renderConversation();
   renderHistory();
@@ -2772,6 +3054,25 @@ function init() {
     // AJOUT : mémorise le dernier modèle de CHAT (pour restaurer le sélecteur
     // après une génération/modification d'image).
     store.lastChatModel = IMAGE_MODELS.has(m) ? prev : m;
+  });
+
+  // AJOUT — Garde premium CodeCraft : sélectionner un modèle « cc: » demande le
+  // code secret (une seule fois par session). Écouteur supplémentaire : la
+  // logique existante ci-dessus n'est pas modifiée.
+  $("#modelSelect").addEventListener("change", () => {
+    const m = currentModel();
+    if (!CODECRAFT_MODELS.has(m)) { lastGoodModel = m; return; }
+    if (codeCraftUnlocked) { lastGoodModel = m; markCodeCraftSelected(); return; }
+    const prev = lastGoodModel || DEFAULT_MODEL;
+    askSecretCode((okCode) => {
+      if (okCode) {
+        unlockCodeCraft();
+        toast("🔓 Modèles CodeCraft débloqués", "success");
+      } else {
+        revertCodeCraftModel(prev);
+        toast("🔒 Code requis pour les modèles CodeCraft.", "error");
+      }
+    });
   });
 
   // modèle de vision
