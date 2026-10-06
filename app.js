@@ -449,6 +449,13 @@ function renderMarkdown(src) {
     } else if (/^\d+\.\s+/.test(t)) {
       flush();
       out.push(`<ol><li>${renderInline(t.replace(/^\d+\.\s+/, ""))}</li></ol>`);
+    } else if (/^#{4,}\s/.test(t)) {
+      // AJOUT — titres Markdown de niveau 4+ (#### / ##### …). Le rendu ne
+      // gérait que #/##/### : les dièses restaient visibles dans le texte.
+      // On les transforme en titre « fond rouge » (sans les dièses).
+      flush();
+      const level = Math.min(t.match(/^#+/)[0].length, 6);
+      out.push(`<h${level} class="md-h-red">${renderInline(t.replace(/^#{4,}\s*/, ""))}</h${level}>`);
     } else {
       para.push(t);
     }
