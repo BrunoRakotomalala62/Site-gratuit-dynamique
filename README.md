@@ -209,7 +209,10 @@ sur Vercel, branché sur l'API gratuite
   (« dans cette photo, où est la solution ? »…) — le bot ne répond plus
   « je ne vois pas de photo jointe ». Une pilule « 📷 Exercice en mémoire »
   l'affiche ; une nouvelle photo la remplace, le bouton ✕ l'oublie.
-- 🌍 100 % côté client, zéro build, pas de clé API.
+- 🌍 100 % côté client, zéro build, pas de clé API — **sauf** l'édition d'image
+  Magic Hour, servie par une fonction Vercel (voir § Édition d'image Magic Hour).
+- ✨ **Édition d'image Magic Hour** (ajout) : bouton « Modifier · Magic Hour »
+  (modèles **gratuits**) via la route serveur `POST /api/image-edit`.
 
 ## 🚀 Déploiement
 
@@ -221,6 +224,12 @@ npx vercel --prod
 ```
 
 `vercel.json` configure les headers de sécurité et les URL propres.
+
+> 🔑 **Édition d'image Magic Hour** : ajoutez la variable d'environnement
+> `MAGIC_HOUR_API_KEY` dans Vercel (Settings > Environment Variables) — clé créée
+> sur https://magichour.ai/developer (crédits gratuits à l'inscription) — puis
+> **redéployez**. Sans elle, `/api/image-edit` renvoie une erreur `config_error`.
+> Le chat, les figures et les autres fonctionnalités n'en ont pas besoin.
 
 ## 🔌 API utilisée
 
@@ -246,18 +255,93 @@ Réponse : `{ success, reply, model, uid, images?, conversationId, source }`.
 > En cas d'API pas encore à jour (404/405), le site retombe automatiquement sur
 > le GET avec re-compression au budget URL.
 
+## ✨ Édition d'image Magic Hour — `POST /api/image-edit` (ajout)
+
+Cette fonctionnalité **s'ajoute** aux modes image existants : la génération et la
+modification **ChatiPro** (`chatipro.vercel.app/api/image*`) restent intactes.
+Elle apporte un second chemin de modification d'image, **gratuit**, servi par la
+fonction serverless `api/image-edit.js` de **ce site**.
+
+**Pourquoi côté serveur ?** La clé `MAGIC_HOUR_API_KEY` ne doit jamais atteindre
+le navigateur. Le site envoie l'image à `/api/image-edit` (même origine), la
+fonction appelle Magic Hour avec la clé, puis renvoie l'image prête.
+
+**Utilisation dans le site** — deux entrées, mêmes effets :
+- menu **＋ → 🎨 Images → « ✨ Modifier · Magic Hour »** (visible dès qu'une image est jointe) ;
+- sélecteur de modèle → groupe **🖼️ Images → « ✨ modifier · Magic Hour (gratuit) »**.
+
+On joint une image, on choisit l'option, on écrit ce qu'on veut changer
+(ex. « ajoute des lunettes de soleil »), puis on envoie. Le rendu arrive comme une
+image dans la conversation.
+
+### API de la route
+
+| Route | Rôle |
+|---|---|
+| `GET /api/image-edit` | Modèles **gratuits** disponibles (`?all=1` = catalogue complet) |
+| `POST /api/image-edit` | Modifie une image : `{ image, prompt, model?, resolution?, wait? }` |
+| `GET /api/image-edit?id=…` | État d'un rendu (`&wait=1` pour attendre) |
+
+- `image` : data URL (`data:image/…;base64,…`), base64 nu, ou URL publique http(s).
+- `wait` : `true` par défaut (la route attend et renvoie `dataUrl` ; si le budget
+  serveur est dépassé, elle renvoie `pending:true` + `id`, et le site interroge
+  `GET /api/image-edit?id=…`).
+- Réponse : `{ success, dataUrl, id, status, model, creditsCharged }`.
+
+### Modèles gratuits (« free »)
+
+| Modèle | Coût | Résolutions | Idéal pour |
+|---|---|---|---|
+| `flux-2-klein` *(défaut)* | **5 crédits/image** | 640px, 1k, 2k | Retouche, restyle, ajout/retrait d'objets |
+| `qwen-edit` | 10 crédits/image | 640px, 1k, 2k | Inpainting guidé, suppression d'objets |
+| `krea-2` | 10 crédits/image | 640px, 1k | Restyle depuis une seule image |
+
+> ⚡ En **compte gratuit**, restez en résolution **`640px`** (défaut). Les modèles
+> `nano-banana*`, `gpt-image-2*`, `seedream-*` et les résolutions `1k`/`2k`/`4k`
+> nécessitent un plan payant.
+
+### Variables d'environnement (Vercel)
+
+| Variable | Rôle |
+|---|---|
+| `MAGIC_HOUR_API_KEY` | **Requise.** Clé Magic Hour (crédits gratuits) |
+| `IMAGE_EDIT_MODEL` | Modèle par défaut (défaut `flux-2-klein`, gratuit) |
+| `IMAGE_EDIT_RESOLUTION` | Résolution par défaut (défaut `640px`, gratuite) |
+| `IMAGE_EDIT_WAIT_MS` | Budget d'attente synchrone (défaut 48 s) |
+| `IMAGE_EDIT_HARD_BUDGET_MS` | Plafond dur avant la limite Vercel de 60 s (défaut 55 s) |
+| `IMAGE_EDIT_MAX_BYTES` | Taille maximale d'une image (défaut ~4,5 Mo) |
+| `IMAGE_EDIT_MOCK` | `1` = rendu simulé hors ligne (tests, aucune clé) |
+
 ## 📁 Structure
 
 ```
 index.html      → interface (hamburger, composer, lightbox…, chip « Trace une courbe »)
 styles.css      → thème premium (glassmorphism, animations, responsive, bloc figure)
 app.js          → logique (API, modèles, historique, pièces jointes, markdown, figures, mode vocal)
+api/image-edit.js     → (ajout) fonction Vercel : édition d'image Magic Hour (clé côté serveur)
 test-figures.js → tests unitaires de la détection des figures (node test-figures.js)
-vercel.json     → configuration Vercel (headers + cleanUrls)
+test-voice-loop.js     → (ajout) tests du tour de parole vocal 🎧 — anti-écho (node test-voice-loop.js)
+test-image-edit.js    → (ajout) tests hors ligne de /api/image-edit (node test-image-edit.js)
+vercel.json     → configuration Vercel (headers + cleanUrls + maxDuration de la fonction)
 ```
 
 ## 🧪 Tests API effectués
 
+- ✅ **Tour de parole vocal 🎧 — anti-écho** — `node test-voice-loop.js` : **17/17**
+  sans navigateur ni micro. Couvre la cause du « le bot répond puis envoie
+  n'importe quoi tout seul, en boucle ». Deux mécanismes sont verrouillés :
+  **(1)** le micro ne se rouvre plus tant que la transcription Whisper du tour
+  précédent n'est pas terminée (verrou `transcribing`) — sans lui, un 2ᵉ
+  enregistrement partait pendant l'attente et envoyait un message de plus, en
+  boucle ; **(2)** le filtre anti-écho compare la transcription à la dernière
+  phrase prononcée par le bot (≥ 5 mots, ≥ 90 % communs, pas plus longue) et la
+  **rejette**. Vérifie aussi que le champ de saisie n'est **plus** lu comme
+  transcription, le seuil de parole relevé, et le délai de réarmement à 900 ms.
+- ✅ **Édition d'image Magic Hour** — `node test-image-edit.js` : **17/17** hors ligne
+  (mode `IMAGE_EDIT_MOCK=1`, sans clé ni réseau) : modèles gratuits, édition data URL
+  et URL publique, mode asynchrone (`wait:false`), lecture de statut, validations
+  (prompt/image/modèle/résolution), 405, préflight CORS, erreur `config_error` sans clé,
+  et contrôle du câblage du site (bouton, route, `maxDuration`).
 - ✅ Chat texte : `GET /api/chat?prompt=…&model=…&uid=…` → 200 JSON
 - ✅ Vision 1 image (URL & data-URI) → réponse + `images[]`
 - ✅ Vision multi-images (2 data-URI) → comparaison + 2 entrées dans `images[]`
