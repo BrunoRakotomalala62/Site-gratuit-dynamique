@@ -53,8 +53,6 @@ const MODELS = {
   ],
   "Mercury · Inception": [
     ["mercury-3", "Mercury 3 · rapide + vision"],
-    ["mercury-2.5", "Mercury 2.5"],
-    ["mercury-2", "Mercury 2"],
   ],
   "UnlimitedAI": [
     ["claude", "claude"],
@@ -101,9 +99,7 @@ const UAI_MODELS = new Set([
 ]);
 
 /* Modèles servis par Mercy API (Inception Labs). */
-const MERCURY_MODELS = new Set([
-  "mercury-2", "mercury-2.5", "mercury-3",
-]);
+const MERCURY_MODELS = new Set(["mercury-3"]);
 
 /* Modèles compatibles IMAGE (vision) : gpt-5.6-luna (API historique),
    Mercury via mercury-decide, les modèles vision UnlimitedAI (claude,
@@ -111,8 +107,7 @@ const MERCURY_MODELS = new Set([
    on utilise le modèle choisi s'il fait partie de cette liste (sinon repli
    sur le sélecteur vision). */
 const VISION_MODELS = new Set([
-  "gpt-5.6-luna",
-  "mercury-3", "mercury-2.5", "mercury-2",
+  "gpt-5.6-luna", "mercury-3",
   "claude", "chatgpt", "gemini", "grok", "perplexity",
   "lumo-max", "lumo",
 ]);
@@ -187,6 +182,27 @@ function loadHistory() {
 
 function getConversation(id) {
   return store.history.find((c) => c.id === id) || null;
+}
+
+/* Les anciennes conversations peuvent encore mémoriser un modèle Mercury
+   retiré du sélecteur. Elles basculent silencieusement vers le seul modèle
+   Mercury désormais proposé, sans modifier l'attribution des anciens messages. */
+function migrateRemovedMercurySelections() {
+  let historyChanged = false;
+  for (const conv of store.history) {
+    const model = String(conv && conv.model || "");
+    if (model.startsWith("mercury-") && !MERCURY_MODELS.has(model)) {
+      conv.model = "mercury-3";
+      historyChanged = true;
+    }
+  }
+  if (historyChanged) saveHistory();
+  try {
+    const vision = localStorage.getItem(LS_VISION_MODEL) || "";
+    if (vision.startsWith("mercury-") && !MERCURY_MODELS.has(vision)) {
+      localStorage.setItem(LS_VISION_MODEL, "mercury-3");
+    }
+  } catch (e) { /* stockage indisponible : aucune migration nécessaire */ }
 }
 
 /* ---------- Rendu Markdown sécurisé ---------- */
@@ -1253,8 +1269,7 @@ function populateVisionSelect() {
   sel.innerHTML = "";
   const seen = new Set();
   const items = [];
-  for (const v of ["gpt-5.6-luna",
-                   "mercury-3", "mercury-2.5", "mercury-2",
+  for (const v of ["gpt-5.6-luna", "mercury-3",
                    "claude", "chatgpt", "gemini", "grok", "perplexity",
                    "lumo-max", "lumo"]) {
     if (seen.has(v)) continue;
@@ -2027,7 +2042,7 @@ function normalizeMercuryResult(data, status, fallbackModel) {
     return {
       success: false,
       error: unavailable
-        ? `${model} n'est pas activé pour la clé Inception actuelle. Choisissez Mercury 3 ou activez ce modèle dans le compte Inception.`
+        ? `${model} est momentanément indisponible sur le service Inception. Réessayez ultérieurement.`
         : (typeof raw === "string" ? raw : `Erreur Mercury HTTP ${status}`),
       model,
     };
@@ -2829,6 +2844,7 @@ function init() {
   localStorage.setItem(LS_UID, store.uid);
 
   loadHistory();
+  migrateRemovedMercurySelections();
   populateModelSelect();
   populateVisionSelect();
   updateModelPill();

@@ -5,17 +5,15 @@ sur Vercel, branché sur l'API gratuite
 [`chat-free-gpt`](https://github.com/BrunoRakotomalala62/chat-free-gpt)
 (`https://chat-free-gpt.vercel.app/api/chat`).
 
-**AJOUT (Mercury / Inception)** : le groupe *« Mercury · Inception »* ajoute
-`mercury-3`, `mercury-2.5` et `mercury-2`, routés vers
+**AJOUT (Mercury / Inception)** : le groupe *« Mercury · Inception »* propose
+uniquement `mercury-3`, routé vers
 [`mercy_api`](https://github.com/BrunoRakotomalala62/mercy_api)
 (`https://mercyapi.vercel.app/api`). Les réponses affichent leur consommation
 réelle (`input`, `output`, `reasoning`, total) dans une pastille sous le message.
-Mercury accepte le texte, les images par URL et les images locales converties
+Mercury 3 accepte le texte, les images par URL et les images locales converties
 en data URLs ; jusqu'à quatre images sont transmises en POST. La continuité est
 conservée côté site, et chaque appel Mercy utilise `reset=true` afin d'éviter de
-doubler l'historique côté API. La disponibilité de Mercury 2 et 2.5 dépend des
-droits attachés à la clé Inception ; si l'amont les refuse, l'interface affiche
-un message explicite et propose Mercury 3.
+doubler l'historique côté API.
 
 **AJOUT (API secondaire)** : le groupe de modèles *« UnlimitedAI (sans
 inscription) »* (claude, chatgpt, gemini, deepseek, grok, perplexity, meta,
@@ -26,8 +24,8 @@ qwen) est routé vers une seconde API
 de l'API se fait automatiquement selon le modèle sélectionné.
 
 **Vision** : quand une image est jointe, le site utilise le modèle choisi
-dans le menu si celui-ci est compatible image (gpt-5.6-luna, les trois modèles
-Mercury via `mercury-decide`, et les modèles vision UnlimitedAI : claude,
+dans le menu si celui-ci est compatible image (gpt-5.6-luna, Mercury 3 via
+`mercury-decide`, et les modèles vision UnlimitedAI : claude,
 chatgpt, gemini, grok, perplexity) ; sinon il
 se replie sur le sélecteur « 🖼️ Vision » (lui aussi rempli avec tous les
 modèles vision). Les images sont envoyées en base64 ou par URL à l'API

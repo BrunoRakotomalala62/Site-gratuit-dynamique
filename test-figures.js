@@ -20,7 +20,7 @@ function t(name, cond) {
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 console.log("--- intégration Mercury ---");
-t("trois modèles Mercury disponibles", eq(L.mercuryModels.sort(), ["mercury-2", "mercury-2.5", "mercury-3"]));
+t("Mercury 3 est le seul modèle Mercury disponible", eq(L.mercuryModels, ["mercury-3"]));
 const mercuryOk = L.normalizeMercuryResult({
   ok: true,
   answer: "Bonjour de Mercury",
@@ -36,8 +36,8 @@ t("erreur Mercy lisible", mercuryErr.success === false && mercuryErr.error === "
 const mercuryUnavailable = L.normalizeMercuryResult({
   ok: false,
   error: { code: "inception_model_unavailable", message: "model not found" },
-}, 502, "mercury-2.5");
-t("modèle Mercury non activé : conseil Mercury 3", mercuryUnavailable.error.includes("Mercury 3"));
+}, 502, "mercury-3");
+t("indisponibilité Mercury expliquée lisiblement", mercuryUnavailable.error.includes("momentanément indisponible"));
 
 console.log("--- normalizeExpression ---");
 t("x\u00b2-2x+1", L.normalizeExpression("x\u00b2-2x+1") === "x^2-2x+1");
