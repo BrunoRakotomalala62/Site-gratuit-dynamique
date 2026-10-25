@@ -5,6 +5,18 @@ sur Vercel, branché sur l'API gratuite
 [`chat-free-gpt`](https://github.com/BrunoRakotomalala62/chat-free-gpt)
 (`https://chat-free-gpt.vercel.app/api/chat`).
 
+**AJOUT (Mercury / Inception)** : le groupe *« Mercury · Inception »* ajoute
+`mercury-3`, `mercury-2.5` et `mercury-2`, routés vers
+[`mercy_api`](https://github.com/BrunoRakotomalala62/mercy_api)
+(`https://mercyapi.vercel.app/api`). Les réponses affichent leur consommation
+réelle (`input`, `output`, `reasoning`, total) dans une pastille sous le message.
+Mercury accepte le texte, les images par URL et les images locales converties
+en data URLs ; jusqu'à quatre images sont transmises en POST. La continuité est
+conservée côté site, et chaque appel Mercy utilise `reset=true` afin d'éviter de
+doubler l'historique côté API. La disponibilité de Mercury 2 et 2.5 dépend des
+droits attachés à la clé Inception ; si l'amont les refuse, l'interface affiche
+un message explicite et propose Mercury 3.
+
 **AJOUT (API secondaire)** : le groupe de modèles *« UnlimitedAI (sans
 inscription) »* (claude, chatgpt, gemini, deepseek, grok, perplexity, meta,
 qwen) est routé vers une seconde API
@@ -14,8 +26,9 @@ qwen) est routé vers une seconde API
 de l'API se fait automatiquement selon le modèle sélectionné.
 
 **Vision** : quand une image est jointe, le site utilise le modèle choisi
-dans le menu si celui-ci est compatible image (gpt-5.6-luna + les modèles
-vision UnlimitedAI : claude, chatgpt, gemini, grok, perplexity) ; sinon il
+dans le menu si celui-ci est compatible image (gpt-5.6-luna, les trois modèles
+Mercury via `mercury-decide`, et les modèles vision UnlimitedAI : claude,
+chatgpt, gemini, grok, perplexity) ; sinon il
 se replie sur le sélecteur « 🖼️ Vision » (lui aussi rempli avec tous les
 modèles vision). Les images sont envoyées en base64 ou par URL à l'API
 correspondante.
@@ -86,8 +99,8 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
 - 🤖 **Menu déroulant multi-modèles** placé **sous la zone de saisie** :
   `ChatGPT` → gpt-5.6-luna (seul modèle gratuit authentique
   de l'API historique, vérifié le 2026-09-05), plus les groupes
-  **UnlimitedAI**, **ChatiPro**, **Lumo (Proton)** et **🖼️ Images** servis
-  par leurs propres APIs. Les anciens noms d'emprunt (gpt-5.x, gpt-4.x,
+  **Mercury · Inception**, **UnlimitedAI**, **ChatiPro**, **Lumo (Proton)** et
+  **🖼️ Images** servis par leurs propres APIs. Les anciens noms d'emprunt (gpt-5.x, gpt-4.x,
   o1/o3, claude-*, gemini-*, deepseek-*, llama, grok, qwen, mixtral) ont été
   **retirés** : ils ne faisaient pas tourner le modèle annoncé. Les modèles
   **PRO** (`gpt-5.6-terra`, `gpt-4o`) sont signalés 🔒.
@@ -227,7 +240,16 @@ npx vercel --prod
 ```
 GET  https://chat-free-gpt.vercel.app/api/chat?prompt=bonjour&model=gpt-5.6-luna&uid=123&lang=fr
 POST https://chat-free-gpt.vercel.app/api/chat   (JSON { prompt, model, images })
+
+POST https://mercyapi.vercel.app/api
+     { "message": "bonjour", "model": "mercury-3", "uid": "...", "reset": true,
+       "images": ["data:image/jpeg;base64,..."] }
 ```
+
+Pour Mercury, la réponse `{ ok, answer, model, tokens, image? }` est adaptée
+côté navigateur en `{ success, reply, model, tokens }`. Aucun secret Inception
+n'est placé dans ce dépôt : la clé reste uniquement dans les variables
+Vercel du projet `mercyapi`.
 
 | Paramètre | Description |
 |---|---|

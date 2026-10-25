@@ -9,7 +9,7 @@ global.document = {
   createElement: () => ({ className: "", appendChild() {}, }),
   body: { appendChild: () => {} },
 };
-require("/home/user/.workspace/projects/Site-gratuit-dynamique/app.js");
+require("./app.js");
 const L = global.window.Lumina;
 
 let pass = 0, fail = 0;
@@ -18,6 +18,26 @@ function t(name, cond) {
   else { fail++; console.log("  \u2717 FAIL: " + name); }
 }
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+console.log("--- intégration Mercury ---");
+t("trois modèles Mercury disponibles", eq(L.mercuryModels.sort(), ["mercury-2", "mercury-2.5", "mercury-3"]));
+const mercuryOk = L.normalizeMercuryResult({
+  ok: true,
+  answer: "Bonjour de Mercury",
+  model: "mercury-3",
+  tokens: { request: { total: 158 } },
+}, 200, "mercury-3");
+t("réponse Mercy adaptée au contrat du site", mercuryOk.success === true && mercuryOk.reply === "Bonjour de Mercury" && mercuryOk.tokens.request.total === 158);
+const mercuryErr = L.normalizeMercuryResult({
+  ok: false,
+  error: { code: "invalid_model", message: "Modèle invalide" },
+}, 400, "mercury-3");
+t("erreur Mercy lisible", mercuryErr.success === false && mercuryErr.error === "Modèle invalide");
+const mercuryUnavailable = L.normalizeMercuryResult({
+  ok: false,
+  error: { code: "inception_model_unavailable", message: "model not found" },
+}, 502, "mercury-2.5");
+t("modèle Mercury non activé : conseil Mercury 3", mercuryUnavailable.error.includes("Mercury 3"));
 
 console.log("--- normalizeExpression ---");
 t("x\u00b2-2x+1", L.normalizeExpression("x\u00b2-2x+1") === "x^2-2x+1");

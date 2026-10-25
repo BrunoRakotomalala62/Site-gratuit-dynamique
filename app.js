@@ -26,6 +26,12 @@ const API_PLOT_URL = `${API_BASE}/api/plot`; // figures : courbes (expression=) 
    Chat texte + vision (image_url ou upload data URL via POST). */
 const API_BASE_LUMO = "https://l-umoprotonme.vercel.app";
 const API_URL_LUMO = `${API_BASE_LUMO}/api/chat`;
+
+/* AJOUT — Mercury (Inception) : API conversationnelle créée dans le dépôt
+   mercy_api. Les trois modèles partagent la même route ; l'API adapte aussi
+   les images (URL ou data URL) via Mercury Decide et renvoie le détail tokens. */
+const API_BASE_MERCURY = "https://mercyapi.vercel.app";
+const API_URL_MERCURY = `${API_BASE_MERCURY}/api`;
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const LANG = "fr";
 const MAX_IMAGES = 4;
@@ -44,6 +50,11 @@ const MAX_IMAGES_PER_REQUEST = 4;
 const MODELS = {
   "ChatGPT": [
     ["gpt-5.6-luna", "gpt-5.6-luna (défaut)"],
+  ],
+  "Mercury · Inception": [
+    ["mercury-3", "Mercury 3 · rapide + vision"],
+    ["mercury-2.5", "Mercury 2.5"],
+    ["mercury-2", "Mercury 2"],
   ],
   "UnlimitedAI": [
     ["claude", "claude"],
@@ -89,13 +100,19 @@ const UAI_MODELS = new Set([
   "grok", "perplexity", "meta", "qwen",
 ]);
 
-/* Modèles compatibles IMAGE (vision) : gpt-5.6-luna (API historique) +
-   les modèles vision des API UnlimitedAI (claude, chatgpt, gemini, grok,
-   perplexity) et Lumo. Quand une image est jointe, on utilise le modèle
-   choisi par l'utilisateur s'il fait partie de cette liste (sinon repli
+/* Modèles servis par Mercy API (Inception Labs). */
+const MERCURY_MODELS = new Set([
+  "mercury-2", "mercury-2.5", "mercury-3",
+]);
+
+/* Modèles compatibles IMAGE (vision) : gpt-5.6-luna (API historique),
+   Mercury via mercury-decide, les modèles vision UnlimitedAI (claude,
+   chatgpt, gemini, grok, perplexity) et Lumo. Quand une image est jointe,
+   on utilise le modèle choisi s'il fait partie de cette liste (sinon repli
    sur le sélecteur vision). */
 const VISION_MODELS = new Set([
   "gpt-5.6-luna",
+  "mercury-3", "mercury-2.5", "mercury-2",
   "claude", "chatgpt", "gemini", "grok", "perplexity",
   "lumo-max", "lumo",
 ]);
@@ -457,6 +474,21 @@ function renderMessage(m) {
   const time = m.time ? new Date(m.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
   if (m.model) meta.appendChild(el("span", "m-model", m.model));
   if (time) meta.appendChild(el("span", "m-time", time));
+  const tokenTotal = Number(m.tokens && m.tokens.request && m.tokens.request.total);
+  if (Number.isFinite(tokenTotal) && tokenTotal > 0) {
+    const tokenBadge = el("span", "m-tokens", `⚡ ${tokenTotal.toLocaleString("fr-FR")} tokens`);
+    const input = Number(m.tokens.request.input);
+    const output = Number(m.tokens.request.output);
+    const reasoning = Number(m.tokens.chat && m.tokens.chat.reasoning);
+    const similar = Number(m.tokens && m.tokens.free_tier_projection && m.tokens.free_tier_projection.similar_requests);
+    const details = ["Consommation de cette requête"];
+    if (Number.isFinite(input)) details.push(`entrée : ${input.toLocaleString("fr-FR")}`);
+    if (Number.isFinite(output)) details.push(`sortie : ${output.toLocaleString("fr-FR")}`);
+    if (Number.isFinite(reasoning)) details.push(`raisonnement : ${reasoning.toLocaleString("fr-FR")} (inclus dans la sortie)`);
+    if (Number.isFinite(similar)) details.push(`≈ ${similar.toLocaleString("fr-FR")} requêtes similaires pour 100 M tokens`);
+    tokenBadge.title = details.join(" · ");
+    meta.appendChild(tokenBadge);
+  }
   if (m.note) meta.appendChild(el("span", "m-note", m.note));
   if (m.completed) meta.appendChild(el("span", "m-note", "✂️ réponse complétée"));
   if (m.images && m.images.length) meta.appendChild(el("span", "m-vision", "🖼️ vision"));
@@ -1218,6 +1250,7 @@ function populateVisionSelect() {
   const seen = new Set();
   const items = [];
   for (const v of ["gpt-5.6-luna",
+                   "mercury-3", "mercury-2.5", "mercury-2",
                    "claude", "chatgpt", "gemini", "grok", "perplexity",
                    "lumo-max", "lumo"]) {
     if (seen.has(v)) continue;
@@ -1523,12 +1556,16 @@ function rememberedImages(conv) {
 
 function clearImageMemory(conv) {
   if (conv) conv.lastImageRef = undefined;
-  renderAttachmentTray();
+  if (typeof document !== "undefined" && typeof document.getElementById === "function") {
+    renderAttachmentTray();
+  }
 }
 
 function clearFigureMemory(conv) {
   if (conv) conv.lastFigure = undefined;
-  renderAttachmentTray();
+  if (typeof document !== "undefined" && typeof document.getElementById === "function") {
+    renderAttachmentTray();
+  }
 }
 
 /* Pilules « 📷 Exercice en mémoire » / « 📐 Figure en mémoire » dans la
@@ -1763,7 +1800,8 @@ async function sendMessage(text, attachments) {
     const selForApi = currentModel();
     const effForApi = (toSend.length && !VISION_MODELS.has(selForApi)) ? visionModel() : selForApi;
     const chatFreeGptHandles =
-      !UAI_MODELS.has(effForApi) && !CHATI_MODELS.has(effForApi) && !LUMO_MODELS.has(effForApi);
+      !UAI_MODELS.has(effForApi) && !CHATI_MODELS.has(effForApi) &&
+      !LUMO_MODELS.has(effForApi) && !MERCURY_MODELS.has(effForApi);
     const firstMsg = !(conv.messages || []).some((m) => m.role === "assistant");
 
     if (chatFreeGptHandles) {
@@ -1909,6 +1947,7 @@ async function sendMessage(text, attachments) {
           model: finalData.model || currentModel(),
           time: Date.now(),
           completed,
+          tokens: finalData.tokens || undefined,
         };
         conv.messages.push(reply);
         const replyEl = renderMessage(reply);
@@ -1965,6 +2004,86 @@ async function sendMessage(text, attachments) {
   }
 }
 
+function normalizeMercuryResult(data, status, fallbackModel) {
+  const model = (data && data.model) || fallbackModel;
+  if (status === 429) {
+    return {
+      success: false,
+      error: "Mercury a atteint sa limite temporaire — réessayez dans quelques secondes.",
+      model,
+    };
+  }
+  if (!data || typeof data !== "object") {
+    return { success: false, error: `Réponse Mercury invalide (HTTP ${status})`, model };
+  }
+  if (status < 200 || status >= 300 || data.ok !== true) {
+    const code = data.error && data.error.code;
+    const raw = data.error && (data.error.message || code || data.error);
+    const unavailable = code === "inception_model_unavailable";
+    return {
+      success: false,
+      error: unavailable
+        ? `${model} n'est pas activé pour la clé Inception actuelle. Choisissez Mercury 3 ou activez ce modèle dans le compte Inception.`
+        : (typeof raw === "string" ? raw : `Erreur Mercury HTTP ${status}`),
+      model,
+    };
+  }
+  if (typeof data.answer !== "string" || !data.answer.trim()) {
+    return { success: false, error: "Mercury a renvoyé une réponse vide.", model };
+  }
+  return {
+    success: true,
+    reply: data.answer,
+    model,
+    tokens: data.tokens || null,
+    usage: data.usage || null,
+    vision: data.image || null,
+    source: "mercy-api",
+  };
+}
+
+function mercuryConversationUid() {
+  const raw = `${store.uid || "web"}:${store.activeId || "default"}`;
+  return raw.replace(/[^A-Za-z0-9._:@-]/g, "-").slice(0, 128);
+}
+
+async function callMercuryApi(text, attachments, model) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120000);
+  const images = (attachments || [])
+    .slice(0, MAX_IMAGES_PER_REQUEST)
+    .map((item) => item.value)
+    .filter(Boolean);
+  try {
+    const response = await fetch(API_URL_MERCURY, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        message: String(text || "").trim().slice(0, 12000),
+        uid: mercuryConversationUid(),
+        model,
+        reset: true,
+        ...(images.length ? { images } : {}),
+      }),
+      signal: controller.signal,
+    });
+    let data = null;
+    try { data = await response.json(); } catch (e) { /* corps non JSON */ }
+    return normalizeMercuryResult(data, response.status, model);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      return { success: false, error: "Mercury a dépassé le délai de 120 secondes.", model };
+    }
+    return {
+      success: false,
+      error: `Impossible de joindre Mercy API : ${error.message || "erreur réseau"}`,
+      model,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function callApi(text, attachments, modelOverride, convCtx) {
   const hasImages = (attachments || []).length > 0;
   // Vision (image jointe) : modèle compatible image si le modèle texte
@@ -1977,14 +2096,16 @@ async function callApi(text, attachments, modelOverride, convCtx) {
   const useUAI = UAI_MODELS.has(model);
   const useChati = CHATI_MODELS.has(model);
   const useLumo = LUMO_MODELS.has(model);
-  const ENDPOINT = useLumo ? API_URL_LUMO : (useUAI ? API_URL_2 : (useChati ? API_URL_3 : API_URL));
+  const useMercury = MERCURY_MODELS.has(model);
+  const ENDPOINT = useMercury ? API_URL_MERCURY
+    : (useLumo ? API_URL_LUMO : (useUAI ? API_URL_2 : (useChati ? API_URL_3 : API_URL)));
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST);
 
   // AJOUT — conversation continue : l'API chat-free-gpt (premier backend)
   // gère elle-même la continuité ; on lui transmet l'historique de cette
   // conversation et, au besoin, le signal « reset » (nouvelle conversation
   // ou nouvelles photos = nouveau sujet, on ne pollue pas la demande).
-  const viaChatFreeGpt = !useUAI && !useChati && !useLumo;
+  const viaChatFreeGpt = !useUAI && !useChati && !useLumo && !useMercury;
   const historyJson =
     viaChatFreeGpt && convCtx && Array.isArray(convCtx.history) && convCtx.history.length
       ? JSON.stringify(convCtx.history)
@@ -1995,6 +2116,10 @@ async function callApi(text, attachments, modelOverride, convCtx) {
   // (fraction à barre horizontale, puissances ^, indices _ — comme le premier backend).
   let promptText = text.trim().slice(0, 4000);
   if ((useUAI || useChati) && looksMathy(promptText)) promptText += MATH_PROMPT_HINT;
+
+  // Mercury possède son propre contrat ({message, images[]} → {answer, tokens}).
+  // On l'adapte ici au contrat interne du site ({success, reply, model}).
+  if (useMercury) return await callMercuryApi(promptText, imgs, model);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90000);
@@ -2915,7 +3040,8 @@ window.Lumina = {
   fetchFigure, maybeBuildFigure, detectGeometryRequest, fetchGeoFigure,
   resolveSendImages, rememberedImages, clearImageMemory, clearFigureMemory,
   renderImageMemoryPill, svgToPngDataUri, rememberFigure, detectFigureRemark,
-  renderMarkdown,
+  renderMarkdown, normalizeMercuryResult,
+  mercuryModels: [...MERCURY_MODELS],
 };
 
 // Affichage des erreurs JS (débogage à distance)
