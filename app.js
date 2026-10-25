@@ -242,13 +242,17 @@ function isBareLatexFormulaLine(t) {
   return words.length <= 2;
 }
 
-/* AJOUT — rendu fiable des maths de la nouvelle API :
-   - normalise les backslashes doublés des commandes (\\frac → \frac),
-     comme l'étape 2 de renderMarkdown, mais pour les blocs ```latex/```tex
-   - garantit des délimiteurs (\[ … \]) autour d'un LaTeX « nu »
-     (ex. \frac{5}{8} seul, sans $ ni \[ … \]) pour que KaTeX le rende. */
+/* AJOUT — rendu fiable des maths des différentes API :
+   - normalise les backslashes doublés des commandes (\\frac → \frac) ;
+   - Mercury 3 double aussi les délimiteurs et échappements LaTeX
+     (\\[...\\], \\(...\\), \\{...\\}, \\,), qu'il faut ramener à un seul
+     backslash pour que KaTeX les reconnaisse ;
+   - préserve les doubles backslashes suivis d'un espace ou d'un saut de ligne,
+     qui sont de vrais séparateurs de lignes dans les tableaux LaTeX. */
 function normalizeMathBackslashes(content) {
-  return String(content).replace(/\\(?=\\(?=[a-zA-Z]))/g, "");
+  return String(content)
+    .replace(/\\(?=\\(?=[a-zA-Z]))/g, "")
+    .replace(/\\\\(?=[\[\](){}%,;:!_#$&|])/g, "\\");
 }
 
 function ensureMathDelimiters(content) {
@@ -256,9 +260,9 @@ function ensureMathDelimiters(content) {
   return /\$|\\\[|\\\(/.test(s) ? s : "\\[" + s + "\\]";
 }
 
-/* AJOUT — consigne LaTeX pour les modèles UnlimitedAI quand la question
-   semble mathématique (pour obtenir la même qualité de notation que le
-   premier backend : fraction à barre horizontale, puissances, indices…). */
+/* Consigne LaTeX pour les backends qui ne l'imposent pas toujours eux-mêmes
+   (UnlimitedAI, ChatiPro et Mercury) quand la question semble mathématique :
+   fractions horizontales, puissances, indices et symboles rendus par KaTeX. */
 const MATH_PROMPT_HINT = "\n\n(Consigne de formatage : si ta réponse contient des formules mathématiques, écris-les en notation LaTeX avec délimiteurs — $...$ en inline, $$...$$ ou \\[...\\] pour une formule affichée — fractions avec \\frac{num}{dén}, puissances avec ^, indices avec _.)";
 
 /* Consigne renforcée pour Lumo : Lumo omet parfois les délimiteurs autour
@@ -292,10 +296,10 @@ function renderMarkdown(src) {
     return token;
   });
 
-  // 2. normaliser le LaTeX : le modèle double parfois les backslashes des
-  //    commandes (\\frac → \frac), mais PAS les séparateurs de ligne des
-  //    tableaux (\\ suivi d'un espace/saut de ligne = fin de ligne, à garder)
-  text = text.replace(/\\(?=\\(?=[a-zA-Z]))/g, "");
+  // 2. normaliser le LaTeX : certains modèles doublent les backslashes des
+  //    commandes, délimiteurs et symboles. Les vrais séparateurs de lignes
+  //    des tableaux (\\ suivi d'un espace/saut de ligne) restent intacts.
+  text = normalizeMathBackslashes(text);
 
   // 3. extraire les maths « display » multi-lignes ($ … $ et \[ … \])
   text = text.replace(/\$\$[\s\S]*?\$\$/g, (m) => {
@@ -2112,10 +2116,12 @@ async function callApi(text, attachments, modelOverride, convCtx) {
       : null;
   const resetFlag = viaChatFreeGpt && convCtx && convCtx.reset ? 1 : 0;
 
-  // AJOUT : consigne LaTeX pour les modèles UnlimitedAI sur question mathématique
-  // (fraction à barre horizontale, puissances ^, indices _ — comme le premier backend).
+  // Consigne LaTeX pour UnlimitedAI, ChatiPro et Mercury sur les questions
+  // mathématiques (fraction horizontale, puissances, indices et symboles).
   let promptText = text.trim().slice(0, 4000);
-  if ((useUAI || useChati) && looksMathy(promptText)) promptText += MATH_PROMPT_HINT;
+  if ((useUAI || useChati || useMercury) && looksMathy(promptText)) {
+    promptText += MATH_PROMPT_HINT;
+  }
 
   // Mercury possède son propre contrat ({message, images[]} → {answer, tokens}).
   // On l'adapte ici au contrat interne du site ({success, reply, model}).

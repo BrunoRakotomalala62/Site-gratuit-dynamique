@@ -347,6 +347,15 @@ console.log("--- fetchGeoFigure (URL /api/geo) ---");
   t("tableau nu → enveloppé en display", outBare.includes("math-block") && outBare.includes("\\[\\begin{array}"), outBare);
   t("tableau nu : séparateur \\\\ préservé", /f\(x\)\\\\ /.test(outBare), outBare);
   t("commande doublée \\\\frac → \\frac", R2("\\\\frac{1}{2}").includes("\\frac{1}{2}"));
+  const mercuryLatex = String.raw`Résultat :
+\\[
+x_1 = \\frac{5 \\pm 1}{2}, \\quad S = \\{2,3\\}
+\\]
+et \\(x_2 = 2\\).`;
+  const outMercuryLatex = R2(mercuryLatex);
+  t("Mercury : délimiteurs display doublés normalisés", outMercuryLatex.includes("math-block") && outMercuryLatex.includes("\\[\nx_1 = \\frac") && !outMercuryLatex.includes("\\\\["), outMercuryLatex);
+  t("Mercury : délimiteurs inline doublés normalisés", outMercuryLatex.includes("\\(x_2 = 2\\)") && !outMercuryLatex.includes("\\\\(x_2"), outMercuryLatex);
+  t("Mercury : accolades et espaces LaTeX doublés normalisés", outMercuryLatex.includes("S = \\{2,3\\}") && outMercuryLatex.includes("\\quad"), outMercuryLatex);
   t("code js reste code", R2("```js\nconsole.log(1)\n```").includes("language-js"));
   t("$$…$$ pas de double enveloppe", !R2("$$\\begin{array}{c} a\\\\ b \\end{array}$$").includes("\\[\\["));
 

@@ -106,15 +106,9 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
   **PRO** (`gpt-5.6-terra`, `gpt-4o`) sont signalés 🔒.
 - 📐 **Notation mathématique (KaTeX)** : indices, puissances, fractions à
   barre horizontale, racines, intégrales, matrices… rendus dans les réponses
-  (inline `$…# Site-gratuit-dynamique — Lumina Chat ✨
-
-Interface de **chat IA premium, gratuite et dynamique** — site statique déployable
-sur Vercel, branché sur l'API gratuite
-[`chat-free-gpt`](https://github.com/BrunoRakotomalala62/chat-free-gpt)
-(`https://chat-free-gpt.vercel.app/api/chat`).
-
-, `\(…\)` et display `$…$`, `\[…\]`), avec normalisation
-  automatique des backslashes doublés du modèle.
+  (inline `$…$`, `\(…\)` et display `$$…$$`, `\[…\]`). Le site normalise
+  aussi les commandes, délimiteurs et symboles LaTeX que Mercury 3 renvoie
+  parfois avec des backslashes doublés.
 - 📎 **Pièces jointes** : jusqu'à **4 images** par message — le bouton
   trombone est un `<label>` natif (le navigateur ouvre directement le
   sélecteur de fichiers, zéro JS : fiable sur tous les navigateurs, Safari/iOS
