@@ -61,6 +61,7 @@ const MODELS = {
   ],
   "ZenMux · Gratuit": [
     ["z-ai/glm-4.6v-flash-free", "GLM 4.6V Flash · gratuit + vision"],
+    ["dots-studio/dots3-note-prev", "Dots3-Note Preview · gratuit + vision"],
   ],
   "UnlimitedAI": [
     ["claude", "claude"],
@@ -109,14 +110,18 @@ const UAI_MODELS = new Set([
 /* Modèles servis par Mercy API (Inception Labs). */
 const MERCURY_MODELS = new Set(["mercury-3"]);
 
-/* Modèle multimodal gratuit servi par Zemux API (passerelle ZenMux). */
-const ZENMUX_MODELS = new Set(["z-ai/glm-4.6v-flash-free"]);
+/* Modèles multimodaux gratuits servis par Zemux API (passerelle ZenMux). */
+const ZENMUX_MODELS = new Set([
+  "z-ai/glm-4.6v-flash-free",
+  "dots-studio/dots3-note-prev",
+]);
 
 /* Modèles compatibles IMAGE (vision) : gpt-5.6-luna (API historique),
-   Mercury via mercury-decide, GLM 4.6V via ZenMux, les modèles vision
-   UnlimitedAI (claude, chatgpt, gemini, grok, perplexity) et Lumo. */
+   Mercury via mercury-decide, GLM 4.6V et Dots3-Note via ZenMux, les modèles
+   vision UnlimitedAI (claude, chatgpt, gemini, grok, perplexity) et Lumo. */
 const VISION_MODELS = new Set([
-  "gpt-5.6-luna", "mercury-3", "z-ai/glm-4.6v-flash-free",
+  "gpt-5.6-luna", "mercury-3",
+  "z-ai/glm-4.6v-flash-free", "dots-studio/dots3-note-prev",
   "claude", "chatgpt", "gemini", "grok", "perplexity",
   "lumo-max", "lumo",
 ]);
@@ -1278,7 +1283,8 @@ function populateVisionSelect() {
   sel.innerHTML = "";
   const seen = new Set();
   const items = [];
-  for (const v of ["gpt-5.6-luna", "mercury-3", "z-ai/glm-4.6v-flash-free",
+  for (const v of ["gpt-5.6-luna", "mercury-3",
+                   "z-ai/glm-4.6v-flash-free", "dots-studio/dots3-note-prev",
                    "claude", "chatgpt", "gemini", "grok", "perplexity",
                    "lumo-max", "lumo"]) {
     if (seen.has(v)) continue;
@@ -3158,6 +3164,7 @@ window.Lumina = {
   renderMarkdown, normalizeMercuryResult, normalizeZemuxResult,
   mercuryModels: [...MERCURY_MODELS],
   zenmuxModels: [...ZENMUX_MODELS],
+  visionModels: [...VISION_MODELS],
 };
 
 // Affichage des erreurs JS (débogage à distance)

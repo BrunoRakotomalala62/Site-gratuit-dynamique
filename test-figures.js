@@ -40,7 +40,11 @@ const mercuryUnavailable = L.normalizeMercuryResult({
 t("indisponibilité Mercury expliquée lisiblement", mercuryUnavailable.error.includes("momentanément indisponible"));
 
 console.log("--- intégration ZenMux ---");
-t("un seul modèle gratuit ZenMux disponible", eq(L.zenmuxModels, ["z-ai/glm-4.6v-flash-free"]));
+t("les deux modèles gratuits ZenMux sont disponibles dans l'ordre", eq(L.zenmuxModels, [
+  "z-ai/glm-4.6v-flash-free",
+  "dots-studio/dots3-note-prev",
+]));
+t("Dots3 est proposé pour les pièces jointes vision", L.visionModels.includes("dots-studio/dots3-note-prev"));
 const zemuxOk = L.normalizeZemuxResult({
   ok: true,
   answer: "Bonjour depuis ZenMux",
@@ -49,6 +53,13 @@ const zemuxOk = L.normalizeZemuxResult({
   image: { analyzed: true, count: 1 },
 }, 200, "z-ai/glm-4.6v-flash-free");
 t("réponse Zemux adaptée au contrat du site", zemuxOk.success === true && zemuxOk.reply === "Bonjour depuis ZenMux" && zemuxOk.tokens.request.total === 15 && zemuxOk.vision.count === 1);
+const dotsOk = L.normalizeZemuxResult({
+  ok: true,
+  answer: "Bonjour depuis Dots",
+  model: "dots-studio/dots3-note-prev",
+  tokens: { request: { input: 8, output: 4, reasoning: 0, total: 12 } },
+}, 200, "dots-studio/dots3-note-prev");
+t("réponse Dots adaptée sans perdre son modèle", dotsOk.success === true && dotsOk.reply === "Bonjour depuis Dots" && dotsOk.model === "dots-studio/dots3-note-prev");
 const zemuxLimited = L.normalizeZemuxResult({ ok: false, error: { code: "rate_limited", message: "limit" } }, 429, "z-ai/glm-4.6v-flash-free");
 t("limite ZenMux expliquée lisiblement", zemuxLimited.success === false && zemuxLimited.error.includes("limite temporaire"));
 
