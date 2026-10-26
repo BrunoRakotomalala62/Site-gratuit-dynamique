@@ -32,6 +32,11 @@ const API_URL_LUMO = `${API_BASE_LUMO}/api/chat`;
    les images (URL ou data URL) via Mercury Decide et renvoie le détail tokens. */
 const API_BASE_MERCURY = "https://mercyapi.vercel.app";
 const API_URL_MERCURY = `${API_BASE_MERCURY}/api`;
+
+/* ZenMux : API serveur séparée et sécurisée. La clé ZenMux reste uniquement
+   dans les variables Vercel de Zemux_api ; elle n'est jamais envoyée au navigateur. */
+const API_BASE_ZEMUX = "https://zemuxapi.vercel.app";
+const API_URL_ZEMUX = `${API_BASE_ZEMUX}/api`;
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const LANG = "fr";
 const MAX_IMAGES = 4;
@@ -53,6 +58,9 @@ const MODELS = {
   ],
   "Mercury · Inception": [
     ["mercury-3", "Mercury 3 · rapide + vision"],
+  ],
+  "ZenMux · Gratuit": [
+    ["z-ai/glm-4.6v-flash-free", "GLM 4.6V Flash · gratuit + vision"],
   ],
   "UnlimitedAI": [
     ["claude", "claude"],
@@ -101,13 +109,14 @@ const UAI_MODELS = new Set([
 /* Modèles servis par Mercy API (Inception Labs). */
 const MERCURY_MODELS = new Set(["mercury-3"]);
 
+/* Modèle multimodal gratuit servi par Zemux API (passerelle ZenMux). */
+const ZENMUX_MODELS = new Set(["z-ai/glm-4.6v-flash-free"]);
+
 /* Modèles compatibles IMAGE (vision) : gpt-5.6-luna (API historique),
-   Mercury via mercury-decide, les modèles vision UnlimitedAI (claude,
-   chatgpt, gemini, grok, perplexity) et Lumo. Quand une image est jointe,
-   on utilise le modèle choisi s'il fait partie de cette liste (sinon repli
-   sur le sélecteur vision). */
+   Mercury via mercury-decide, GLM 4.6V via ZenMux, les modèles vision
+   UnlimitedAI (claude, chatgpt, gemini, grok, perplexity) et Lumo. */
 const VISION_MODELS = new Set([
-  "gpt-5.6-luna", "mercury-3",
+  "gpt-5.6-luna", "mercury-3", "z-ai/glm-4.6v-flash-free",
   "claude", "chatgpt", "gemini", "grok", "perplexity",
   "lumo-max", "lumo",
 ]);
@@ -277,7 +286,7 @@ function ensureMathDelimiters(content) {
 }
 
 /* Consigne LaTeX pour les backends qui ne l'imposent pas toujours eux-mêmes
-   (UnlimitedAI, ChatiPro et Mercury) quand la question semble mathématique :
+   (UnlimitedAI, ChatiPro, Mercury et ZenMux) sur les questions mathématiques :
    fractions horizontales, puissances, indices et symboles rendus par KaTeX. */
 const MATH_PROMPT_HINT = "\n\n(Consigne de formatage : si ta réponse contient des formules mathématiques, écris-les en notation LaTeX avec délimiteurs — $...$ en inline, $$...$$ ou \\[...\\] pour une formule affichée — fractions avec \\frac{num}{dén}, puissances avec ^, indices avec _.)";
 
@@ -1269,7 +1278,7 @@ function populateVisionSelect() {
   sel.innerHTML = "";
   const seen = new Set();
   const items = [];
-  for (const v of ["gpt-5.6-luna", "mercury-3",
+  for (const v of ["gpt-5.6-luna", "mercury-3", "z-ai/glm-4.6v-flash-free",
                    "claude", "chatgpt", "gemini", "grok", "perplexity",
                    "lumo-max", "lumo"]) {
     if (seen.has(v)) continue;
@@ -1820,7 +1829,8 @@ async function sendMessage(text, attachments) {
     const effForApi = (toSend.length && !VISION_MODELS.has(selForApi)) ? visionModel() : selForApi;
     const chatFreeGptHandles =
       !UAI_MODELS.has(effForApi) && !CHATI_MODELS.has(effForApi) &&
-      !LUMO_MODELS.has(effForApi) && !MERCURY_MODELS.has(effForApi);
+      !LUMO_MODELS.has(effForApi) && !MERCURY_MODELS.has(effForApi) &&
+      !ZENMUX_MODELS.has(effForApi);
     const firstMsg = !(conv.messages || []).some((m) => m.role === "assistant");
 
     if (chatFreeGptHandles) {
@@ -2103,6 +2113,87 @@ async function callMercuryApi(text, attachments, model) {
   }
 }
 
+function normalizeZemuxResult(data, status, fallbackModel) {
+  const model = (data && data.model) || fallbackModel;
+  if (status === 429) {
+    return {
+      success: false,
+      error: "Le modèle gratuit ZenMux a atteint sa limite temporaire — réessayez dans une minute.",
+      model,
+    };
+  }
+  if (!data || typeof data !== "object") {
+    return { success: false, error: `Réponse Zemux API invalide (HTTP ${status})`, model };
+  }
+  if (status < 200 || status >= 300 || data.ok !== true) {
+    const code = data.error && data.error.code;
+    const raw = data.error && (data.error.message || code || data.error);
+    const balance = code === "zenmux_balance_required" || status === 402;
+    return {
+      success: false,
+      error: balance
+        ? "ZenMux exige temporairement un solde positif pour son contrôle anti-abus, même avec ce modèle gratuit."
+        : (typeof raw === "string" ? raw : `Erreur Zemux API HTTP ${status}`),
+      model,
+    };
+  }
+  if (typeof data.answer !== "string" || !data.answer.trim()) {
+    return { success: false, error: "Le modèle ZenMux a renvoyé une réponse vide.", model };
+  }
+  return {
+    success: true,
+    reply: data.answer,
+    model,
+    tokens: data.tokens || null,
+    usage: data.usage || null,
+    billing: data.billing || null,
+    vision: data.image || null,
+    source: "zemux-api",
+  };
+}
+
+function zemuxConversationUid() {
+  const raw = `zmx:${store.uid || "web"}:${store.activeId || "default"}`;
+  return raw.replace(/[^A-Za-z0-9._:@-]/g, "-").slice(0, 128);
+}
+
+async function callZemuxApi(text, attachments, model) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 65000);
+  const images = (attachments || [])
+    .slice(0, MAX_IMAGES_PER_REQUEST)
+    .map((item) => item.value)
+    .filter(Boolean);
+  try {
+    const response = await fetch(API_URL_ZEMUX, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        message: String(text || "").trim().slice(0, 12000),
+        uid: zemuxConversationUid(),
+        model,
+        reset: true,
+        ...(images.length ? { images } : {}),
+      }),
+      signal: controller.signal,
+    });
+    let data = null;
+    try { data = await response.json(); } catch (e) { /* corps non JSON */ }
+    return normalizeZemuxResult(data, response.status, model);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      return { success: false, error: "Zemux API a dépassé le délai de 65 secondes.", model };
+    }
+    return {
+      success: false,
+      error: `Impossible de joindre Zemux API : ${error.message || "erreur réseau"}`,
+      model,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function callApi(text, attachments, modelOverride, convCtx) {
   const hasImages = (attachments || []).length > 0;
   // Vision (image jointe) : modèle compatible image si le modèle texte
@@ -2116,31 +2207,33 @@ async function callApi(text, attachments, modelOverride, convCtx) {
   const useChati = CHATI_MODELS.has(model);
   const useLumo = LUMO_MODELS.has(model);
   const useMercury = MERCURY_MODELS.has(model);
-  const ENDPOINT = useMercury ? API_URL_MERCURY
-    : (useLumo ? API_URL_LUMO : (useUAI ? API_URL_2 : (useChati ? API_URL_3 : API_URL)));
+  const useZemux = ZENMUX_MODELS.has(model);
+  const ENDPOINT = useZemux ? API_URL_ZEMUX
+    : (useMercury ? API_URL_MERCURY
+      : (useLumo ? API_URL_LUMO : (useUAI ? API_URL_2 : (useChati ? API_URL_3 : API_URL))));
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST);
 
   // AJOUT — conversation continue : l'API chat-free-gpt (premier backend)
   // gère elle-même la continuité ; on lui transmet l'historique de cette
   // conversation et, au besoin, le signal « reset » (nouvelle conversation
   // ou nouvelles photos = nouveau sujet, on ne pollue pas la demande).
-  const viaChatFreeGpt = !useUAI && !useChati && !useLumo && !useMercury;
+  const viaChatFreeGpt = !useUAI && !useChati && !useLumo && !useMercury && !useZemux;
   const historyJson =
     viaChatFreeGpt && convCtx && Array.isArray(convCtx.history) && convCtx.history.length
       ? JSON.stringify(convCtx.history)
       : null;
   const resetFlag = viaChatFreeGpt && convCtx && convCtx.reset ? 1 : 0;
 
-  // Consigne LaTeX pour UnlimitedAI, ChatiPro et Mercury sur les questions
-  // mathématiques (fraction horizontale, puissances, indices et symboles).
+  // Consigne LaTeX pour UnlimitedAI, ChatiPro, Mercury et ZenMux sur les
+  // questions mathématiques (fraction horizontale, puissances et indices).
   let promptText = text.trim().slice(0, 4000);
-  if ((useUAI || useChati || useMercury) && looksMathy(promptText)) {
+  if ((useUAI || useChati || useMercury || useZemux) && looksMathy(promptText)) {
     promptText += MATH_PROMPT_HINT;
   }
 
-  // Mercury possède son propre contrat ({message, images[]} → {answer, tokens}).
-  // On l'adapte ici au contrat interne du site ({success, reply, model}).
+  // Les APIs dédiées sont adaptées au contrat interne du site.
   if (useMercury) return await callMercuryApi(promptText, imgs, model);
+  if (useZemux) return await callZemuxApi(promptText, imgs, model);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90000);
@@ -3062,8 +3155,9 @@ window.Lumina = {
   fetchFigure, maybeBuildFigure, detectGeometryRequest, fetchGeoFigure,
   resolveSendImages, rememberedImages, clearImageMemory, clearFigureMemory,
   renderImageMemoryPill, svgToPngDataUri, rememberFigure, detectFigureRemark,
-  renderMarkdown, normalizeMercuryResult,
+  renderMarkdown, normalizeMercuryResult, normalizeZemuxResult,
   mercuryModels: [...MERCURY_MODELS],
+  zenmuxModels: [...ZENMUX_MODELS],
 };
 
 // Affichage des erreurs JS (débogage à distance)

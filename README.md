@@ -15,6 +15,15 @@ en data URLs ; jusqu'à quatre images sont transmises en POST. La continuité es
 conservée côté site, et chaque appel Mercy utilise `reset=true` afin d'éviter de
 doubler l'historique côté API.
 
+**AJOUT (ZenMux gratuit)** : le groupe *« ZenMux · Gratuit »* propose
+`z-ai/glm-4.6v-flash-free`, un modèle texte + vision routé vers
+[`Zemux_api`](https://github.com/BrunoRakotomalala62/Zemux_api)
+(`https://zemuxapi.vercel.app/api`). La clé ZenMux reste uniquement dans les
+variables Vercel de cette API. Le modèle est verrouillé côté serveur afin
+qu'aucun visiteur ne puisse sélectionner un modèle ZenMux payant. Les images
+locales et distantes, l'historique client, le rendu KaTeX et le rapport de
+tokens sont pris en charge.
+
 **AJOUT (API secondaire)** : le groupe de modèles *« UnlimitedAI (sans
 inscription) »* (claude, chatgpt, gemini, deepseek, grok, perplexity, meta,
 qwen) est routé vers une seconde API
@@ -25,8 +34,8 @@ de l'API se fait automatiquement selon le modèle sélectionné.
 
 **Vision** : quand une image est jointe, le site utilise le modèle choisi
 dans le menu si celui-ci est compatible image (gpt-5.6-luna, Mercury 3 via
-`mercury-decide`, et les modèles vision UnlimitedAI : claude,
-chatgpt, gemini, grok, perplexity) ; sinon il
+`mercury-decide`, GLM 4.6V Flash via ZenMux, et les modèles vision UnlimitedAI :
+claude, chatgpt, gemini, grok, perplexity) ; sinon il
 se replie sur le sélecteur « 🖼️ Vision » (lui aussi rempli avec tous les
 modèles vision). Les images sont envoyées en base64 ou par URL à l'API
 correspondante.
@@ -97,8 +106,8 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
 - 🤖 **Menu déroulant multi-modèles** placé **sous la zone de saisie** :
   `ChatGPT` → gpt-5.6-luna (seul modèle gratuit authentique
   de l'API historique, vérifié le 2026-09-05), plus les groupes
-  **Mercury · Inception**, **UnlimitedAI**, **ChatiPro**, **Lumo (Proton)** et
-  **🖼️ Images** servis par leurs propres APIs. Les anciens noms d'emprunt (gpt-5.x, gpt-4.x,
+  **Mercury · Inception**, **ZenMux · Gratuit**, **UnlimitedAI**, **ChatiPro**,
+  **Lumo (Proton)** et **🖼️ Images** servis par leurs propres APIs. Les anciens noms d'emprunt (gpt-5.x, gpt-4.x,
   o1/o3, claude-*, gemini-*, deepseek-*, llama, grok, qwen, mixtral) ont été
   **retirés** : ils ne faisaient pas tourner le modèle annoncé. Les modèles
   **PRO** (`gpt-5.6-terra`, `gpt-4o`) sont signalés 🔒.
@@ -236,12 +245,16 @@ POST https://chat-free-gpt.vercel.app/api/chat   (JSON { prompt, model, images }
 POST https://mercyapi.vercel.app/api
      { "message": "bonjour", "model": "mercury-3", "uid": "...", "reset": true,
        "images": ["data:image/jpeg;base64,..."] }
+
+POST https://zemuxapi.vercel.app/api
+     { "message": "bonjour", "model": "z-ai/glm-4.6v-flash-free", "uid": "...",
+       "reset": true, "images": ["data:image/jpeg;base64,..."] }
 ```
 
-Pour Mercury, la réponse `{ ok, answer, model, tokens, image? }` est adaptée
-côté navigateur en `{ success, reply, model, tokens }`. Aucun secret Inception
-n'est placé dans ce dépôt : la clé reste uniquement dans les variables
-Vercel du projet `mercyapi`.
+Pour Mercury et ZenMux, la réponse `{ ok, answer, model, tokens, image? }` est
+adaptée côté navigateur en `{ success, reply, model, tokens }`. Aucun secret
+fournisseur n'est placé dans ce dépôt : les clés restent uniquement dans les
+variables Vercel de `mercyapi` et `zemuxapi`.
 
 | Paramètre | Description |
 |---|---|
@@ -275,6 +288,7 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
 - ✅ Chat texte : `GET /api/chat?prompt=…&model=…&uid=…` → 200 JSON
 - ✅ Vision 1 image (URL & data-URI) → réponse + `images[]`
 - ✅ Vision multi-images (2 data-URI) → comparaison + 2 entrées dans `images[]`
+- ✅ ZenMux gratuit : GLM 4.6V Flash testé en production en texte et avec image
 - ✅ Modèles gratuits : gpt-5.6-luna (seul modèle authentique de l'API
   historique — les 37 autres noms testés répondaient tous « ChatGPT » et ont
   été retirés) ; PRO (`gpt-4o`, `gpt-5.6-terra` → 402)

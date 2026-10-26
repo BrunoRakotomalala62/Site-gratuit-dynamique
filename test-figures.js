@@ -39,6 +39,19 @@ const mercuryUnavailable = L.normalizeMercuryResult({
 }, 502, "mercury-3");
 t("indisponibilité Mercury expliquée lisiblement", mercuryUnavailable.error.includes("momentanément indisponible"));
 
+console.log("--- intégration ZenMux ---");
+t("un seul modèle gratuit ZenMux disponible", eq(L.zenmuxModels, ["z-ai/glm-4.6v-flash-free"]));
+const zemuxOk = L.normalizeZemuxResult({
+  ok: true,
+  answer: "Bonjour depuis ZenMux",
+  model: "z-ai/glm-4.6v-flash-free",
+  tokens: { request: { input: 10, output: 5, reasoning: 3, total: 15 } },
+  image: { analyzed: true, count: 1 },
+}, 200, "z-ai/glm-4.6v-flash-free");
+t("réponse Zemux adaptée au contrat du site", zemuxOk.success === true && zemuxOk.reply === "Bonjour depuis ZenMux" && zemuxOk.tokens.request.total === 15 && zemuxOk.vision.count === 1);
+const zemuxLimited = L.normalizeZemuxResult({ ok: false, error: { code: "rate_limited", message: "limit" } }, 429, "z-ai/glm-4.6v-flash-free");
+t("limite ZenMux expliquée lisiblement", zemuxLimited.success === false && zemuxLimited.error.includes("limite temporaire"));
+
 console.log("--- normalizeExpression ---");
 t("x\u00b2-2x+1", L.normalizeExpression("x\u00b2-2x+1") === "x^2-2x+1");
 t("f(x)=x\u00b2-2x+1", L.normalizeExpression("f(x)=x\u00b2-2x+1") === "x^2-2x+1");
