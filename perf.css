@@ -1,0 +1,71 @@
+/* ============================================================
+   perf.css — Optimisation de la fluidité de saisie
+   ------------------------------------------------------------
+   Problème : pendant la frappe, le navigateur doit re-rendre
+   par-dessus un fond animé coûteux (4 orbes, grille animée,
+   canvas de particules) et des effets de verre (backdrop-filter).
+   Sur mobile, cela provoque un lag du champ de texte.
+
+   Solution (non destructive) : quand le champ de saisie est
+   actif, le <body> reçoit la classe "composing" (voir le petit
+   script inline ajouté dans index.html). On fige alors le fond
+   animé et on allège les effets de verre, uniquement pendant
+   la saisie. Hors saisie, le site reste identique à avant.
+   ============================================================ */
+
+/* ---------- 1. Saisie active : fond figé, rendu allégé ---------- */
+
+/* Orbes : animation mise en pause (visibles, juste immobiles) */
+body.composing .orb {
+  animation-play-state: paused;
+}
+
+/* Grille animée : défilement figé */
+body.composing .grid-overlay {
+  animation-play-state: paused;
+}
+
+/* Particules : canvas masqué pendant la saisie (coût de rendu nul) */
+body.composing #particles {
+  display: none;
+}
+
+/* Effets de verre : on retire le flou coûteux pendant la frappe
+   (les éléments gardent leur fond semi-transparent, donc le look
+   reste proche de l'original) */
+body.composing .glass {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ---------- 2. Mobile : allègement permanent ---------- */
+
+@media (max-width: 768px) {
+  /* Particules coupées d'office sur petits écrans : le GPU mobile
+     n'a pas à composer un canvas plein écran en permanence. */
+  #particles {
+    display: none;
+  }
+
+  /* On limite le flou du verre sur mobile (blur réduit) */
+  .glass {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+}
+
+/* ---------- 3. Accessibilité : mouvement réduit ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .grid-overlay,
+  .brand-chip-logo,
+  .empty-orb,
+  .pulse-dot {
+    animation: none !important;
+  }
+
+  #particles {
+    display: none;
+  }
+}
