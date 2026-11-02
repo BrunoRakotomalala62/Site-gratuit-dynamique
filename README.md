@@ -257,10 +257,11 @@ au bout de 4 ou 5 messages consécutifs. Quatre causes cumulées, toutes dans
 **Correctifs** :
 
 - Une **seule** fenêtre glissante côté site pour tous les backends :
-  `CONTEXT_TURNS = 6`, budget `CONTEXT_BUDGET = 3 000` caractères (sous la
-  limite 4 000 de `callApi`), priorité aux échanges **les plus récents**,
-  dernière demande jamais tronquée. Détection des renvois de type
-  « la question A) » / « le point 2) ».
+  `CONTEXT_TURNS = 6`, priorité aux échanges **les plus récents**, dernière
+  demande jamais tronquée. Détection des renvois de type
+  « la question A) » / « le point 2) ». **Deux budgets** : 1 500 caractères
+  pour les API gratuites (limite réelle ~2 000, voir section suivante) avec
+  un en-tête et des extraits compacts, 3 200 pour Mercury / ZenMux.
 - L'API historique ne reçoit plus l'historique complet : `reset=1` et
   `history` vide (elle ajoutait un second contexte). Si un appel fournit
   encore un historique, `boundedApiHistory()` le borne à 2 échanges / 400 /
@@ -275,13 +276,50 @@ au bout de 4 ou 5 messages consécutifs. Quatre causes cumulées, toutes dans
   la conversation active — et prévient l'utilisateur au lieu de perdre tout
   l'historique. L'`uid` n'est plus écrit sans `try/catch` au démarrage.
 
-Vérification : `node test-figures.js` → **164 tests, 0 échec** (dont 17 nouveaux
-tests sur la fenêtre glissante, la taille de l'URL et le garde-fou de stockage).
+Vérification : `node test-figures.js` → **174 tests, 0 échec** (fenêtre
+glissante, taille de l'URL, garde-fou de stockage, limite 2 000 caractères).
 Test d'intégration (DOM simulé + `fetch` simulé) : **9 échanges consécutifs**,
 0 erreur JS, 0 bulle d'erreur, contexte présent à chaque suite, URL qui se
-stabilise à ~3,6 Ko au lieu de grossir indéfiniment. Une réponse HTTP 414
-forcée affiche désormais un message explicite au lieu de « Réponse invalide ».
-`index.html` passe en `app.js?v=55` pour invalider le cache des navigateurs.
+stabilise au lieu de grossir indéfiniment. Une réponse HTTP 414 forcée affiche
+désormais un message explicite au lieu de « Réponse invalide ».
+
+## ⚠️ « The input context exceeds 2000 characters, please cut it down and try again. »
+
+Ce message ne vient **pas du site** : c'est le fournisseur gratuit derrière
+l'API (aichatting.net et les ponts gratuits) qui refuse tout prompt de plus
+d'environ **2 000 caractères**. Il le renvoie soit dans `error`, soit — c'est
+le piège — **comme texte de réponse normale** (`success: true`) : le site
+l'affichait donc comme si c'était la réponse du bot, au lieu de continuer la
+conversation.
+
+Pourquoi ça arrivait systématiquement en « suite de conversation » : le
+correctif précédent ajoutait un bloc de contexte de ~3 000 caractères à la
+question. Contexte + question > 2 000 → refus à chaque enchaînement.
+
+**Correctif** :
+
+- `PROMPT_LIMITS` : plafond par backend — **1 800 caractères** pour
+  `chat-free-gpt` / UnlimitedAI / ChatiPro / Lumo, 12 000 pour Mercury et
+  ZenMux (leur `maxPromptChars`). `fitPromptToLimit()` ajuste avant l'envoi.
+- Le format **compact** du contexte (en-tête court, Q ≤ 120, R ≤ 260) tient
+  dans ~1 100–1 500 caractères tout en gardant 2 à 3 échanges : la
+  conversation continue sans jamais approcher la limite.
+- Si malgré tout le fournisseur renvoie la phrase anglaise (en erreur **ou**
+  comme réponse), `isContextTooLongReply()` la détecte et `sendMessage()`
+  **réessaie une fois avec la question seule**, sans contexte : l'utilisateur
+  voit une vraie réponse. En dernier recours, `friendlyApiError()` traduit le
+  message en consigne française au lieu d'afficher l'anglais brut.
+- Quand un prompt long doit être raccourci, la **question est toujours
+  conservée** (bloc de contexte supprimé, ou début + fin gardés pour un long
+  texte / PDF) — jamais coupée au milieu de la demande.
+
+Test d'intégration dédié : backend simulé qui renvoie la phrase anglaise dès
+que le prompt dépasse 2 000 caractères → 7 échanges consécutifs, prompt max
+**1 105 caractères**, aucun message anglais affiché. Avec un backend simulé
+encore plus strict (1 000), le retry automatique prend le relais : toujours
+0 erreur et la conversation continue.
+
+`index.html` passe en `app.js?v=56` pour invalider le cache des navigateurs.
 
 ## 🚀 Déploiement
 
@@ -360,7 +398,7 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
   été retirés) ; PRO (`gpt-4o`, `gpt-5.6-terra` → 402)
 - ✅ Figures : `GET /api/plot?expression=x-2ln(x)` (courbe) et
   `GET /api/plot?subject=circuit+électrique…` (schéma IA) → `{ svg }`
-- ✅ `node test-figures.js` : **164 tests** (figures, LaTeX, conversation continue, garde-fou localStorage)
+- ✅ `node test-figures.js` : **174 tests** (figures, LaTeX, conversation continue, limite 2 000 caractères, garde-fou localStorage)
 - ✅ **Barre de saisie + menu ＋** (2026-09-28, Chrome headless) : le champ
   occupe **87 %** de la barre (702/806 px) et ne reste que **2 boutons** dans la
   barre (＋ et ➤) ; menu fermé au départ puis ouvert/positionné **au-dessus** ;

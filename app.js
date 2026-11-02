@@ -42,6 +42,63 @@ const LANG = "fr";
 const MAX_IMAGES = 4;
 const MAX_IMAGES_PER_REQUEST = 4;
 
+/* ---------- Limite de taille des prompts des backends gratuits ----------
+   Le fournisseur gratuit refuse tout message de plus de ~2 000 caractères en
+   renvoyant (parfois en `error`, parfois CARRÉMENT COMME RÉPONSE du bot) :
+   « The input context exceeds 2000 characters, please cut it down and try
+   again. » Dès qu'on ajoute un bloc de contexte à la question, le prompt
+   dépasse cette limite et la conversation s'arrête au lieu de continuer.
+   On garde donc une marge : 1 800 caractères maximum pour ces backends.
+   Mercury / ZenMux, eux, acceptent 12 000 caractères (leur config
+   `maxPromptChars`). */
+const SMALL_PROMPT_LIMIT = 1800;
+const LARGE_PROMPT_LIMIT = 12000;
+const PROMPT_LIMITS = {
+  [API_URL]: SMALL_PROMPT_LIMIT,
+  [API_URL_2]: SMALL_PROMPT_LIMIT,
+  [API_URL_3]: SMALL_PROMPT_LIMIT,
+  [API_URL_LUMO]: SMALL_PROMPT_LIMIT,
+  [API_URL_MERCURY]: LARGE_PROMPT_LIMIT,
+  [API_URL_ZEMUX]: LARGE_PROMPT_LIMIT,
+};
+const CONTEXT_DEMAND_MARKER = "— Dernière demande : « ";
+const CONTEXT_TOO_LONG_RE =
+  /input context exceeds|cut it down|context (?:is )?too long|prompt (?:is )?too (?:long|large)|exceeds? (?:the )?(?:2000|2 000) characters/i;
+
+/** Vrai si l'API a répondu le message « contexte trop long » (en erreur OU
+    comme texte de réponse, ce qui arrive sur les backends gratuits). */
+function isContextTooLongReply(data) {
+  if (!data || typeof data !== "object") return false;
+  return CONTEXT_TOO_LONG_RE.test(String(data.error || "") + " " + String(data.reply || ""));
+}
+
+/** Traduit l'erreur anglaise du fournisseur en consigne exploitable. */
+function friendlyApiError(message) {
+  const s = String(message || "Erreur inconnue du serveur.");
+  return CONTEXT_TOO_LONG_RE.test(s)
+    ? "Le service gratuit limite chaque message à environ 2 000 caractères. Raccourcissez votre question ou démarrez une nouvelle conversation."
+    : s;
+}
+
+/* Ajuste un prompt au plafond du backend. Deux cas :
+   - prompt avec NOTRE bloc de contexte → on supprime tout le contexte et on
+     garde la question (qui est à la fin). Jamais l'inverse : couper la fin
+     ferait disparaître la vraie demande de l'utilisateur.
+   - long message / extrait PDF sans contexte → on garde le DÉBUT et la FIN
+     (la question est souvent en dernier), avec une ellipse au milieu. */
+function fitPromptToLimit(text, limit = SMALL_PROMPT_LIMIT) {
+  const s = String(text || "").trim();
+  if (s.length <= limit) return s;
+  const at = s.lastIndexOf(CONTEXT_DEMAND_MARKER);
+  if (at >= 0) {
+    const q = s.slice(at);
+    return (q.length > limit ? q.slice(0, limit - 1) + "…" : q).trim();
+  }
+  const head = Math.floor(limit * 0.62);
+  const tail = limit - head - 3;
+  return (s.slice(0, head) + "\n…\n" + s.slice(-tail)).trim();
+}
+
 /* ---------- Modèles (liste authentique testée le 2026-09-05) ----------
    ⚠️ L'API historique chat-free-gpt ne fait tourner qu'UN modèle gratuit
    authentique : gpt-5.6-luna (ChatGPT). Les 37 autres noms (gpt-5.x,
@@ -1721,14 +1778,21 @@ async function rememberFigure(conv, svg, title, desc) {
    bot repart d'une page blanche.
    ============================================================ */
 /* Fenêtre glissante : on garde PLUSIEURS échanges (et non plus seulement 2),
-   en donnant la priorité aux plus récents. Le bloc « contexte + demande »
-   reste sous la limite de 4 000 caractères imposée par callApi / l'API
-   historique (sinon la fin du prompt — la vraie question — est coupée). */
+   en donnant la priorité aux plus récents. Deux budgets selon le backend :
+   - 1 500 caractères pour les API gratuites (limite réelle ~2 000), avec un
+     en-tête et des extraits COMPACTS → la question passe toujours ;
+   - 3 200 caractères pour Mercury / ZenMux (12 000 acceptés).
+   Le bloc « contexte + demande » reste sous le plafond du backend :
+   sinon le fournisseur renvoie « The input context exceeds 2000 characters »
+   à la place de la réponse. */
 const CONTEXT_TURNS = 6;         // échanges (Q+R) examinés au maximum
 const CONTEXT_Q_MAX = 240;       // caractères max par question rappelée
 const CONTEXT_A_MAX = 460;       // caractères max par réponse rappelée
+const COMPACT_Q_MAX = 120;       // version compacte (API gratuites)
+const COMPACT_A_MAX = 260;
 const FOLLOW_UP_MAX_LEN = 60;    // message plus court que ça ⇒ enchaînement
-const CONTEXT_BUDGET = 3000;     // budget total du bloc de contexte
+const CONTEXT_BUDGET = 1500;     // budget des backends à 2 000 caractères
+const CONTEXT_BUDGET_LARGE = 3200; // budget Mercury / ZenMux
 
 /* Historique destiné au paramètre `history` de l'API chat-free-gpt.
    Son backend tronque déjà à 2 échanges / 400 / 700 caractères : on applique
@@ -1802,7 +1866,7 @@ function lastUsableExchanges(conv, maxTurns = CONTEXT_TURNS) {
 /* Fabrique le prompt avec le mini-contexte quand la demande enchaîne.
    kind : "follow" → contexte ajouté ; "new" → nouveau sujet (contexte
    ignoré) ; null → pas d'échange antérieur exploitable. */
-function buildContinuationPrompt(conv, userText) {
+function buildContinuationPrompt(conv, userText, maxChars = CONTEXT_BUDGET) {
   const ex = lastUsableExchanges(conv);
   if (!ex.length) return { kind: null, prompt: null };
   const text = (userText || "").trim();
@@ -1832,12 +1896,20 @@ function buildContinuationPrompt(conv, userText) {
   if (!follow) return { kind: "new", prompt: null };
 
   // Texte démesuré : on n'attache pas de contexte (la demande domine le prompt).
-  if (text.length > CONTEXT_BUDGET - 250) return { kind: null, prompt: null };
+  if (text.length > maxChars - 250) return { kind: null, prompt: null };
 
-  const header = "[Contexte — conversation en cours avec l'utilisateur. Répondez à sa DERNIÈRE demande en vous appuyant sur les échanges ci-dessous, SANS répéter ce qui a déjà été répondu. Si elle cite une partie précise (« la question A) », « le point 2) »), développe uniquement cette partie. Si elle change complètement de sujet, ignorez le contexte et répondez-y comme à une nouvelle question.]";
-  const demand = "— Dernière demande : « " + text + " »";
+  /* Deux formats : compact pour les API gratuites (limite ~2 000 caractères),
+     détaillé pour Mercury / ZenMux. Le compact garde 2 à 3 échanges au lieu
+     d'un seul, tout en restant largement sous la limite du fournisseur. */
+  const compact = maxChars <= SMALL_PROMPT_LIMIT;
+  const header = compact
+    ? "[Contexte — échanges précédents. Réponds à la DERNIÈRE demande en t'appuyant sur ces échanges, SANS répéter ce qui a déjà été dit. Si elle change de sujet, ignore ce contexte.]"
+    : "[Contexte — conversation en cours avec l'utilisateur. Répondez à sa DERNIÈRE demande en vous appuyant sur les échanges ci-dessous, SANS répéter ce qui a déjà été répondu. Si elle cite une partie précise (« la question A) », « le point 2) »), développe uniquement cette partie. Si elle change complètement de sujet, ignorez le contexte et répondez-y comme à une nouvelle question.]";
+  const qMax = compact ? COMPACT_Q_MAX : CONTEXT_Q_MAX;
+  const aMax = compact ? COMPACT_A_MAX : CONTEXT_A_MAX;
+  const demand = CONTEXT_DEMAND_MARKER + text + " »";
   // Budget restant pour les échanges (la demande, elle, n'est JAMAIS coupée).
-  const budget = CONTEXT_BUDGET - header.length - demand.length - 40;
+  const budget = maxChars - header.length - demand.length - 40;
 
   /* `ex` va du PLUS RÉCENT au plus ancien : on remplit le budget en gardant
      d'abord les échanges récents. Avant, le code faisait `block.slice(0, cap)`
@@ -1847,14 +1919,14 @@ function buildContinuationPrompt(conv, userText) {
   const kept = [];
   let used = 0;
   for (const e of ex) {
-    const qLine = "— Question de l'utilisateur : « " + e.q.slice(0, CONTEXT_Q_MAX) + " »";
-    let aLine = "— Réponse déjà donnée : « " + e.a.slice(0, CONTEXT_A_MAX) + " »";
+    const qLine = "— Question de l'utilisateur : « " + e.q.slice(0, qMax) + " »";
+    let aLine = "— Réponse déjà donnée : « " + e.a.slice(0, aMax) + " »";
     let size = qLine.length + aLine.length + 2;
     if (kept.length && used + size > budget) break;
     if (!kept.length && size > budget) {
       // Au moins le dernier échange doit tenir : on raccourcit sa réponse.
       const room = Math.max(80, budget - qLine.length - 40);
-      aLine = "— Réponse déjà donnée : « " + e.a.slice(0, Math.min(CONTEXT_A_MAX, room)) + " »";
+      aLine = "— Réponse déjà donnée : « " + e.a.slice(0, Math.min(aMax, room)) + " »";
       size = qLine.length + aLine.length + 2;
     }
     kept.push(qLine + "\n" + aLine);
@@ -1940,10 +2012,12 @@ async function sendMessage(text, attachments) {
      `reset=true` à CHAQUE appel : leur mémoire serveur était effacée en
      permanence.
      Désormais le site construit lui-même une fenêtre glissante bornée
-     (6 échanges max, ~3 000 caractères, priorité aux plus récents) et
-     demande à l'API historique de NE PAS rajouter son propre contexte :
-     `reset=1` + historique vide → ni double contexte, ni URL géante.
-     Un nouveau sujet / une nouvelle pièce jointe repart de zéro. */
+     (6 échanges max, priorité aux plus récents) et demande à l'API
+     historique de NE PAS rajouter son propre contexte : `reset=1` +
+     historique vide → ni double contexte, ni URL géante.
+     Le budget du bloc dépend du backend : 1 500 caractères pour les API
+     gratuites qui refusent tout prompt > 2 000 caractères, 3 200 pour
+     Mercury / ZenMux. Un nouveau sujet / une pièce jointe repart de zéro. */
   let contNote = null;
   let convCtx = null; // { history, reset } pour l'API chat-free-gpt
   if (imageMode === "chat") {
@@ -1955,11 +2029,14 @@ async function sendMessage(text, attachments) {
       !ZENMUX_MODELS.has(effForApi);
     const noNewImages = !attachments || !attachments.length;
     // Un PDF injecte déjà jusqu'à 3 200 caractères : ajouter le contexte
-    // ferait couper la fin du prompt par la limite 4 000 de callApi.
+    // dépasserait le plafond du backend (2 000 caractères pour les gratuits).
     const noPdf = !(store.pdfs && store.pdfs.length);
+    // Mercury / ZenMux supportent 12 000 caractères : contexte plus riche.
+    const bigContext = MERCURY_MODELS.has(effForApi) || ZENMUX_MODELS.has(effForApi);
+    const ctxBudget = bigContext ? CONTEXT_BUDGET_LARGE : CONTEXT_BUDGET;
 
     if (noNewImages && noPdf) {
-      const cont = buildContinuationPrompt(conv, sendText);
+      const cont = buildContinuationPrompt(conv, sendText, ctxBudget);
       if (cont.kind === "follow" && cont.prompt) {
         sendText = cont.prompt;
         contNote = "🔁 suite de la conversation";
@@ -2072,9 +2149,29 @@ async function sendMessage(text, attachments) {
 
     // AJOUT PDF long : un appel par partie, puis recombinaison des réponses
     // complètes (callPdfChunks) ; le PDF court garde l'appel unique habituel.
-    const data = pdfChunks
+    let data = pdfChunks
       ? await callPdfChunks(sendText, pdfChunks, toSend, typing)
       : await callApi(sendText, toSend, undefined, convCtx);
+
+    /* Le fournisseur gratuit renvoie parfois « The input context exceeds 2000
+       characters… » comme ERREUR, parfois COMME RÉPONSE NORMALE du bot
+       (`success: true`). Dans les deux cas on réessaie UNE fois avec la
+       question seule, sans bloc de contexte : la conversation continue au
+       lieu d'afficher ce message anglais à l'utilisateur. */
+    if (isContextTooLongReply(data)) {
+      const shortText = fitPromptToLimit(text.trim(), 1200);
+      const retry = await callApi(shortText, toSend, undefined, { history: [], reset: 1 })
+        .catch(() => null);
+      if (retry && retry.success && !isContextTooLongReply(retry)) {
+        data = retry;
+      } else {
+        data = {
+          success: false,
+          error: "Le service gratuit limite chaque message à environ 2 000 caractères. Raccourcissez votre question ou démarrez une nouvelle conversation.",
+          model: (data && data.model) || currentModel(),
+        };
+      }
+    }
     // retirer l'indicateur
     typing.remove();
 
@@ -2108,7 +2205,7 @@ async function sendMessage(text, attachments) {
     } else {
       const errMsg = {
         role: "assistant",
-        text: "❌ " + (data.error || "Erreur inconnue du serveur."),
+        text: "❌ " + friendlyApiError(data.error || "Erreur inconnue du serveur."),
         error: true,
         model: data.model || currentModel(),
         time: Date.now(),
@@ -2347,10 +2444,15 @@ async function callApi(text, attachments, modelOverride, convCtx) {
 
   // Consigne LaTeX pour UnlimitedAI, ChatiPro, Mercury et ZenMux sur les
   // questions mathématiques (fraction horizontale, puissances et indices).
-  let promptText = text.trim().slice(0, 4000);
+  let promptText = String(text || "").trim();
   if ((useUAI || useChati || useMercury || useZemux) && looksMathy(promptText)) {
     promptText += MATH_PROMPT_HINT;
   }
+  /* PLAFOND DU BACKEND : les API gratuites refusent > ~2 000 caractères avec
+     « The input context exceeds 2000 characters… ». On ajuste AVANT l'envoi
+     (fitPromptToLimit supprime le contexte plutôt que la question). */
+  const promptLimit = PROMPT_LIMITS[ENDPOINT] || SMALL_PROMPT_LIMIT;
+  promptText = fitPromptToLimit(promptText, promptLimit);
 
   // Les APIs dédiées sont adaptées au contrat interne du site.
   if (useMercury) return await callMercuryApi(promptText, imgs, model);
@@ -2403,7 +2505,7 @@ async function callApi(text, attachments, modelOverride, convCtx) {
 
   try {
     // AJOUT : Lumo (Proton) — flux dédié (réponse {ok, reply, vision, …}).
-    if (useLumo) return await callLumoApi(text, attachments, model);
+    if (useLumo) return await callLumoApi(promptText, attachments, model, promptLimit);
 
     if (hasImages) {
       // --- Vision : POST JSON (v4) — aucune limite de longueur d'URL, image nette ---
@@ -2502,14 +2604,15 @@ async function callApi(text, attachments, modelOverride, convCtx) {
    Vision : POST /api/chat  { prompt, uid, model, images: [data:URL | http URL] }
    Réponse : { ok, reply, model, limits, vision:{attempts,perceived}, warning }
    (contrairement aux autres APIs qui répondent { success, reply }). */
-async function callLumoApi(text, attachments, model) {
+async function callLumoApi(text, attachments, model, promptLimit = SMALL_PROMPT_LIMIT) {
   const hasImages = (attachments || []).length > 0;
   const uid = store.uid || "default";
   const payloadModel = model === "lumo" ? "lumo" : "lumo-max";
-  let promptText = (text || "").trim().slice(0, 4000);
+  let promptText = (text || "").trim();
   // Consigne LaTeX renforcée sur question mathématique (fractions à barre
   // horizontale, puissances ^, indices _, délimiteurs systématiques).
   if (looksMathy(promptText)) promptText += LUMO_MATH_PROMPT_HINT;
+  promptText = fitPromptToLimit(promptText, promptLimit);
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST).map((a) => a.value);
 
   const controller = new AbortController();
@@ -3323,7 +3426,9 @@ window.Lumina = {
   renderMarkdown, normalizeMercuryResult, normalizeZemuxResult,
   // conversation continue / garde-fous de stockage (tests)
   lastUsableExchanges, buildContinuationPrompt, boundedApiHistory,
-  pruneHeavyHistory, contextBudget: CONTEXT_BUDGET, contextTurns: CONTEXT_TURNS,
+  pruneHeavyHistory, fitPromptToLimit, isContextTooLongReply, friendlyApiError,
+  contextBudget: CONTEXT_BUDGET, contextBudgetLarge: CONTEXT_BUDGET_LARGE,
+  smallPromptLimit: SMALL_PROMPT_LIMIT, contextTurns: CONTEXT_TURNS,
   mercuryModels: [...MERCURY_MODELS],
   zenmuxModels: [...ZENMUX_MODELS],
   visionModels: [...VISION_MODELS],

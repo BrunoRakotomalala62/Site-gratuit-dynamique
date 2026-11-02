@@ -463,6 +463,42 @@ et \\(x_2 = 2\\).`;
     L.pruneHeavyHistory(twoConvs, "active", 100).length === 1 &&
     L.pruneHeavyHistory(twoConvs, "active", 100)[0].id === "active");
 
+  /* ============================================================
+     « The input context exceeds 2000 characters… » (fournisseur gratuit)
+     ============================================================ */
+  console.log("--- limite 2 000 caractères du fournisseur gratuit ---");
+  const compact = L.buildContinuationPrompt(convLong, "continue, plus de détails");
+  const large = L.buildContinuationPrompt(convLong, "continue, plus de détails", L.contextBudgetLarge);
+  t("contexte compact strictement < 2 000 caractères",
+    compact.prompt.length < 2000 && compact.prompt.length <= L.contextBudget, String(compact.prompt.length));
+  t("contexte compact garde au moins 2 échanges",
+    (compact.prompt.match(/— Question de l'utilisateur/g) || []).length >= 2);
+  t("Mercury/ZenMux : contexte plus riche mais borné",
+    large.prompt.length > compact.prompt.length && large.prompt.length <= 12000, String(large.prompt.length));
+  t("prompt déjà conforme = inchangé",
+    L.fitPromptToLimit(compact.prompt, L.smallPromptLimit) === compact.prompt);
+
+  const wrapped = "X".repeat(1900) + "\n— Dernière demande : « explique la suite »";
+  const fitted = L.fitPromptToLimit(wrapped, L.smallPromptLimit);
+  t("prompt trop long : la QUESTION survit, le contexte est jeté",
+    fitted.includes("explique la suite") && !fitted.startsWith("X".repeat(100)) &&
+    fitted.length <= L.smallPromptLimit, String(fitted.length));
+  const plainLong = "Début du document. " + "Y".repeat(2500) + "\nQuestion : que conclure ?";
+  const fitted2 = L.fitPromptToLimit(plainLong, L.smallPromptLimit);
+  t("message long sans contexte : début ET fin conservés",
+    fitted2.startsWith("Début du document.") && fitted2.includes("que conclure ?") &&
+    fitted2.length <= L.smallPromptLimit, String(fitted2.length));
+
+  const englishError = "The input context exceeds 2000 characters, please cut it down and try again.";
+  t("message anglais détecté quand c'est une ERREUR",
+    L.isContextTooLongReply({ success: false, error: englishError }));
+  t("message anglais détecté quand c'est la RÉPONSE du bot",
+    L.isContextTooLongReply({ success: true, reply: englishError }));
+  t("une vraie réponse n'est pas confondue avec cette erreur",
+    !L.isContextTooLongReply({ success: true, reply: "Voici la suite de l'explication." }));
+  t("erreur traduite en consigne française",
+    L.friendlyApiError(englishError).includes("2 000 caractères"));
+
   console.log("");
   console.log(pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);
