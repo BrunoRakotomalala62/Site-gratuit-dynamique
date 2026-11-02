@@ -399,6 +399,70 @@ et \\(x_2 = 2\\).`;
   L.clearFigureMemory(convFig);
   t("clearFigureMemory oublie la figure", convFig.lastFigure === undefined, String(convFig.lastFigure));
 
+  /* ============================================================
+     Conversation continue : garde-fous anti-crash après 4-5 échanges
+     ============================================================ */
+  console.log("--- conversation continue (anti-crash) ---");
+  const convLong = { id: "c1", messages: [] };
+  for (let i = 1; i <= 8; i++) {
+    convLong.messages.push({ role: "user", text: `Question ${i} sur les réseaux de neurones` });
+    convLong.messages.push({
+      role: "assistant",
+      text: `Réponse détaillée numéro ${i} sur les réseaux de neurones et l'apprentissage. `.repeat(20),
+    });
+  }
+  const ex = L.lastUsableExchanges(convLong);
+  t("fenêtre glissante : plusieurs échanges examinés", ex.length === L.contextTurns && ex.length > 2, String(ex.length));
+
+  const cont = L.buildContinuationPrompt(convLong, "continue, plus de détails");
+  t("amorce « continue » → suite de la conversation", cont.kind === "follow" && !!cont.prompt);
+  t("bloc de contexte borné (pas de 414, pas de coupure API)", cont.prompt.length <= L.contextBudget, String(cont.prompt.length));
+  t("la dernière demande reste intacte et à la fin",
+    cont.prompt.endsWith("— Dernière demande : « continue, plus de détails »"));
+  t("priorité aux échanges les plus récents",
+    cont.prompt.includes("Question 8") && cont.prompt.includes("Réponse détaillée numéro 8"), cont.prompt.slice(-400));
+  t("les échanges trop anciens sont écartés", !cont.prompt.includes("Question 1 sur"));
+  t("« la question A) » = suite (renvoi à une partie)",
+    L.buildContinuationPrompt(convLong, "développe la question A)").kind === "follow");
+  t("« changeons de sujet » = nouveau sujet",
+    L.buildContinuationPrompt(convLong, "changeons de sujet").kind === "new");
+  t("demande démesurée → aucun contexte",
+    L.buildContinuationPrompt(convLong, "x".repeat(4000)).prompt === null);
+
+  const apiHist = L.boundedApiHistory(ex);
+  t("historique API : 2 échanges maximum", apiHist.length === 2, String(apiHist.length));
+  t("historique API : Q ≤ 400 et R ≤ 700 caractères",
+    apiHist.every((e) => e.q.length <= 400 && e.a.length <= 700));
+  const simulatedUrl = new URLSearchParams({
+    prompt: cont.prompt, model: "gpt-5.6-luna", uid: "u-test", lang: "fr",
+    history: JSON.stringify(apiHist), reset: "1",
+  }).toString();
+  t("URL GET bornée : pas de HTTP 414 après 8 échanges", simulatedUrl.length < 6000, String(simulatedUrl.length));
+
+  console.log("--- garde-fou du stockage localStorage ---");
+  const heavy = {
+    id: "h1", updatedAt: 1,
+    messages: [
+      { role: "user", text: "photo", images: ["data:image/jpeg;base64," + "A".repeat(300000)] },
+      { role: "assistant", text: "réponse", figure: { svg: "<svg>".repeat(500) } },
+      { role: "user", text: "q2" }, { role: "assistant", text: "r2" },
+      { role: "user", text: "q3" }, { role: "assistant", text: "r3" },
+    ],
+    lastFigure: { png: "data:image/png;base64," + "C".repeat(50000) },
+  };
+  const pruned = L.pruneHeavyHistory([heavy], "h1");
+  t("figure PNG régénérable retirée", pruned[0].lastFigure === undefined);
+  t("SVG des anciennes figures retiré", !pruned[0].messages[1].figure);
+  t("images des anciens messages retirées", !pruned[0].messages[0].images);
+  t("texte des messages conservé", pruned[0].messages[0].text === "photo");
+  const twoConvs = [
+    { id: "old", updatedAt: 1, messages: [{ role: "user", text: "x".repeat(300) }] },
+    { id: "active", updatedAt: 2, messages: [{ role: "user", text: "y".repeat(300) }] },
+  ];
+  t("la conversation active n'est jamais supprimée",
+    L.pruneHeavyHistory(twoConvs, "active", 100).length === 1 &&
+    L.pruneHeavyHistory(twoConvs, "active", 100)[0].id === "active");
+
   console.log("");
   console.log(pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);

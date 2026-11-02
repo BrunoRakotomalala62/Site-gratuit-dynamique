@@ -177,12 +177,66 @@ function uid() {
   return "u-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-/* ---------- Stockage ---------- */
+/* ---------- Stockage ----------
+   `localStorage` plafonne à ~5 Mo. Or chaque image jointe est stockée en
+   data-URL (jusqu'à ~350 Ko), plus le PNG de la figure mémorisée et les
+   longues réponses. Au bout de quelques échanges le navigateur lève
+   QuotaExceededError ; avant, le `catch` l'ignorait silencieusement → plus
+   AUCUNE conversation n'était sauvegardée (l'historique « disparaissait »
+   au rechargement). On allège maintenant l'historique au lieu de tout perdre. */
+let storageWarned = false;
+const LS_MAX_CHARS = 3000000;   // marge sous les ~5 Mo (UTF-16)
+
+/** Retire les données lourdes et régénérables, des plus anciennes aux plus
+    récentes, jusqu'à rentrer dans le budget. Ne supprime jamais la
+    conversation active. */
+function pruneHeavyHistory(history, activeId, maxChars = LS_MAX_CHARS) {
+  let out = Array.isArray(history) ? history : [];
+  // 1) figure mémorisée (PNG) et SVG des figures déjà affichées
+  for (const conv of out) {
+    if (conv.lastFigure && conv.lastFigure.png) conv.lastFigure = undefined;
+    for (const m of conv.messages || []) {
+      if (m.figure && m.figure.svg) delete m.figure;
+    }
+  }
+  // 2) images (base64) des messages anciens : on garde les 4 derniers
+  for (const conv of out) {
+    const msgs = conv.messages || [];
+    const keepFrom = Math.max(0, msgs.length - 4);
+    msgs.forEach((m, i) => {
+      if (i < keepFrom && m.images && m.images.length) delete m.images;
+    });
+    if (typeof conv.lastImageRef === "number" &&
+        !(msgs[conv.lastImageRef] && msgs[conv.lastImageRef].images)) {
+      conv.lastImageRef = undefined; // référence devenue invalide
+    }
+  }
+  // 3) en dernier recours, on abandonne les conversations les plus anciennes
+  while (out.length > 1 && JSON.stringify(out).length > maxChars) {
+    const oldest = out
+      .filter((c) => c.id !== activeId)
+      .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0))[0];
+    if (!oldest) break;
+    out = out.filter((c) => c !== oldest);
+  }
+  return out;
+}
+
 function saveHistory() {
   try {
     localStorage.setItem(LS_HISTORY, JSON.stringify(store.history));
-    localStorage.setItem(LS_ACTIVE, store.activeId || "");
-  } catch (e) { /* quota */ }
+  } catch (e) {
+    try {
+      store.history = pruneHeavyHistory(store.history, store.activeId);
+      localStorage.setItem(LS_HISTORY, JSON.stringify(store.history));
+      if (!storageWarned) {
+        storageWarned = true;
+        try { toast("⚠️ Stockage du navigateur plein : les anciennes images ont été retirées de l'historique (le texte est conservé).", "error"); } catch (_) { /* DOM absent */ }
+        try { renderHistory(); } catch (_) { /* DOM absent */ }
+      }
+    } catch (e2) { /* stockage indisponible : la session reste en mémoire */ }
+  }
+  try { localStorage.setItem(LS_ACTIVE, store.activeId || ""); } catch (e) { /* quota */ }
 }
 function loadHistory() {
   try {
@@ -1480,12 +1534,18 @@ async function completeTruncatedReply(replyText, modelForContinuation) {
   let text = replyText || "";
   let completed = false;
   let guard = 0;
-  while (isTruncated(text) && guard < 5) {     // jusqu'à 5 enchaînements
+  /* Chaque « suite » est un APPEL API SUPPLÉMENTAIRE. Sur les offres gratuites
+     (10 msg/jour pour UnlimitedAI, 20 req/min pour ZenMux, 2 messages par
+     visiteur côté aichatting), 5 suites par réponse épuisaient le quota au
+     bout de 4 ou 5 échanges → erreur 429 au milieu de la conversation.
+     On limite à 2 suites et on ne retente QUE si le modèle est vraiment
+     différent (un retry identique sur une erreur 429 ne sert à rien). */
+  while (isTruncated(text) && guard < 2) {
     guard++;
     let cont = await callApi(buildContinuePrompt(text), [], modelForContinuation);
-    if (!cont.success) {
-      // échec (ex. modèle PRO) : on retente avec le modèle gratuit par défaut
-      cont = await callApi(buildContinuePrompt(text), [], modelForContinuation || DEFAULT_MODEL);
+    if (!cont.success && /PRO|402|modèle inconnu|unknown model/i.test(String(cont.error || "")) &&
+        modelForContinuation && modelForContinuation !== DEFAULT_MODEL) {
+      cont = await callApi(buildContinuePrompt(text), [], DEFAULT_MODEL);
     }
     if (!cont.success || !cont.reply || !cont.reply.trim()) break;
     const addition = cont.reply.trim();
@@ -1660,11 +1720,25 @@ async function rememberFigure(conv, svg, title, desc) {
    discussion change de thème, aucun contexte n'est ajouté et le
    bot repart d'une page blanche.
    ============================================================ */
-const CONTEXT_TURNS = 2;         // échanges (Q+R) texte mémorisés au maximum
+/* Fenêtre glissante : on garde PLUSIEURS échanges (et non plus seulement 2),
+   en donnant la priorité aux plus récents. Le bloc « contexte + demande »
+   reste sous la limite de 4 000 caractères imposée par callApi / l'API
+   historique (sinon la fin du prompt — la vraie question — est coupée). */
+const CONTEXT_TURNS = 6;         // échanges (Q+R) examinés au maximum
 const CONTEXT_Q_MAX = 240;       // caractères max par question rappelée
 const CONTEXT_A_MAX = 460;       // caractères max par réponse rappelée
 const FOLLOW_UP_MAX_LEN = 60;    // message plus court que ça ⇒ enchaînement
-const CONTEXT_BUDGET = 3600;     // budget total du bloc de contexte
+const CONTEXT_BUDGET = 3000;     // budget total du bloc de contexte
+
+/* Historique destiné au paramètre `history` de l'API chat-free-gpt.
+   Son backend tronque déjà à 2 échanges / 400 / 700 caractères : on applique
+   les MÊMES plafonds AVANT de sérialiser. Sinon des réponses longues font
+   exploser l'URL en GET (accents encodés ×3) → HTTP 414 de Vercel après
+   quelques échanges. */
+const API_HISTORY_TURNS = 2;
+const API_HISTORY_Q_MAX = 400;
+const API_HISTORY_A_MAX = 700;
+const API_HISTORY_MAX_CHARS = 2600;
 
 /* Amorces qui montrent que l'utilisateur POURSUIT le sujet en cours. */
 const FOLLOW_UP_RE = /(continue|poursuis|poursuit|la suite|et ensuite|plus de détails|détail(le|les|ler|lons)?|précise|précisions|approfondis|approfondir|développe|développer|explique encore|réexplique|ré-explique|reformule|autre exemple|un exemple|exemple concret|pas compris|comprends pas|n'ai pas compris|en savoir plus|vas-y|vas y|qu'?est-ce que tu (veux|voulais) dire)/i;
@@ -1674,6 +1748,10 @@ const NEW_TOPIC_RE = /^(chang(eons|er|e)( de)?|on (change|passe)|passons à|autr
 
 /* Verbes qui introduisent une demande complète (nouvelle question). */
 const FRESH_ASK_RE = /^(explique|donne|raconte|décris|présente|parle|que sais|c'?est quoi|qu'?est-ce que|quel|quelle|quels|quelles|liste|montre|trace|calcule|résume|compare|définis)/i;
+
+/* Renvoi à une partie précise de la réponse précédente (« la question A) »,
+   « le point 2) », « la 3e étape »…) : c'est une suite, pas un nouveau sujet. */
+const PART_REF_RE = /(^|[^a-z0-9])([a-z]|[0-9]{1,2})\)|la ([a-z0-9]|[0-9]{1,2})[eè]?[rm]?(re|ème|e)? (question|partie|étape|point)|question\s*([a-z]|[0-9]{1,2})\)|(première|deuxième|troisième|2e|3e|dernière|suivante) (question|partie|étape|point)/i;
 
 const CONTEXT_STOPWORDS = new Set([
   "avec", "dans", "pour", "mais", "donc", "alors", "quand", "quoi", "comment",
@@ -1701,11 +1779,11 @@ function sigWords(text) {
 
 /* Derniers échanges texte « propres » (sans erreur, sans génération
    d'image), du plus récent au plus ancien — au plus CONTEXT_TURNS. */
-function lastUsableExchanges(conv) {
+function lastUsableExchanges(conv, maxTurns = CONTEXT_TURNS) {
   const out = [];
   if (!conv || !Array.isArray(conv.messages)) return out;
   const msgs = conv.messages;
-  for (let i = msgs.length - 1; i >= 1 && out.length < CONTEXT_TURNS; i--) {
+  for (let i = msgs.length - 1; i >= 1 && out.length < maxTurns; i--) {
     const m = msgs[i];
     if (!m || m.role !== "assistant") continue;
     const t = (m.text || "").trim();
@@ -1740,7 +1818,7 @@ function buildContinuationPrompt(conv, userText) {
   let overlap = 0;
   for (const w of a) if (b.has(w)) overlap++;
 
-  const kwFollow = FOLLOW_UP_RE.test(low);
+  const kwFollow = FOLLOW_UP_RE.test(low) || PART_REF_RE.test(low);
   let follow = kwFollow;
   if (!follow) {
     // Question courte sans amorce : enchaînement — sauf si c'est une nouvelle
@@ -1753,22 +1831,57 @@ function buildContinuationPrompt(conv, userText) {
   }
   if (!follow) return { kind: "new", prompt: null };
 
-  // Construit le bloc de contexte (échanges du plus ancien au plus récent).
-  const parts = ex.slice().reverse();
-  const lines = ["[Contexte — conversation en cours. Répondez à la dernière demande de l'utilisateur en vous appuyant sur l'échange ci-dessous, SANS répéter ce qui a déjà été répondu. Si la dernière demande porte sur un sujet DIFFÉRENT, ignorez le contexte et répondez-y comme à une nouvelle question.]"];
-  for (const e of parts) {
-    lines.push("— Question de l'utilisateur : « " + e.q.slice(0, CONTEXT_Q_MAX) + " »");
-    lines.push("— Réponse déjà donnée : « " + e.a.slice(0, CONTEXT_A_MAX) + " »");
-  }
-  const header = lines.join("\n");
-  // Dernière demande toujours présente (jamais tronquée par la limite API).
-  let block = header;
-  let demand = "— Dernière demande : « " + text + " »";
   // Texte démesuré : on n'attache pas de contexte (la demande domine le prompt).
   if (text.length > CONTEXT_BUDGET - 250) return { kind: null, prompt: null };
-  const hardCap = CONTEXT_BUDGET - demand.length - 80;
-  if (block.length > hardCap) block = block.slice(0, Math.max(0, hardCap));
+
+  const header = "[Contexte — conversation en cours avec l'utilisateur. Répondez à sa DERNIÈRE demande en vous appuyant sur les échanges ci-dessous, SANS répéter ce qui a déjà été répondu. Si elle cite une partie précise (« la question A) », « le point 2) »), développe uniquement cette partie. Si elle change complètement de sujet, ignorez le contexte et répondez-y comme à une nouvelle question.]";
+  const demand = "— Dernière demande : « " + text + " »";
+  // Budget restant pour les échanges (la demande, elle, n'est JAMAIS coupée).
+  const budget = CONTEXT_BUDGET - header.length - demand.length - 40;
+
+  /* `ex` va du PLUS RÉCENT au plus ancien : on remplit le budget en gardant
+     d'abord les échanges récents. Avant, le code faisait `block.slice(0, cap)`
+     sur un bloc classé du plus ancien au plus récent : il coupait donc la FIN,
+     c'est-à-dire le contexte le plus récent → le bot répondait à côté après
+     quelques tours. */
+  const kept = [];
+  let used = 0;
+  for (const e of ex) {
+    const qLine = "— Question de l'utilisateur : « " + e.q.slice(0, CONTEXT_Q_MAX) + " »";
+    let aLine = "— Réponse déjà donnée : « " + e.a.slice(0, CONTEXT_A_MAX) + " »";
+    let size = qLine.length + aLine.length + 2;
+    if (kept.length && used + size > budget) break;
+    if (!kept.length && size > budget) {
+      // Au moins le dernier échange doit tenir : on raccourcit sa réponse.
+      const room = Math.max(80, budget - qLine.length - 40);
+      aLine = "— Réponse déjà donnée : « " + e.a.slice(0, Math.min(CONTEXT_A_MAX, room)) + " »";
+      size = qLine.length + aLine.length + 2;
+    }
+    kept.push(qLine + "\n" + aLine);
+    used += size;
+  }
+  const block = header + "\n" + kept.reverse().join("\n");
   return { kind: "follow", prompt: block + "\n" + demand };
+}
+
+/* Historique court et BORNÉ pour le paramètre `history` de l'API historique.
+   `pairs` est du plus récent au plus ancien ; on ne garde que les 2 premiers
+   et on tronque comme le fait le serveur (lib/conversation.js). */
+function boundedApiHistory(pairs) {
+  const out = [];
+  let used = 0;
+  for (const e of (Array.isArray(pairs) ? pairs : []).slice(0, API_HISTORY_TURNS)) {
+    if (!e) continue;
+    const item = {
+      q: String(e.q || "").slice(0, API_HISTORY_Q_MAX),
+      a: String(e.a || "").slice(0, API_HISTORY_A_MAX),
+    };
+    const size = item.q.length + item.a.length + 20;
+    if (out.length && used + size > API_HISTORY_MAX_CHARS) break;
+    out.push(item);
+    used += size;
+  }
+  return out;
 }
 
 async function sendMessage(text, attachments) {
@@ -1818,16 +1931,19 @@ async function sendMessage(text, attachments) {
     figNote = `\n\n(Contexte — figure construite précédemment, jointe en image : ${fig.desc})`;
   }
 
-  // AJOUT — conversation continue : quand la demande enchaîne sur l'échange
-  // précédent (« plus de détails », question courte, mêmes mots-clés…).
-  // Deux stratégies selon le backend de la demande :
-  //   - API chat-free-gpt (modèles GPT/DeepSeek/Claude/Gemini « site »…) :
-  //     la continuité est gérée PAR L'API (paramètres history/reset) — on
-  //     n'enveloppe PAS le prompt ici (éviter un double contexte).
-  //   - Autres backends (UnlimitedAI, ChatiPro, Lumo) : mini-contexte
-  //     embarqué côté client dans le prompt.
-  // Si l'utilisateur change de thème, aucun contexte n'est transmis et le
-  // bot repart de zéro. Pas appliqué à la génération d'image.
+  /* Conversation continue — UNE SEULE stratégie pour tous les backends.
+     Avant, l'API historique recevait `history` (le texte INTÉGRAL des 2
+     derniers échanges) en paramètre d'URL GET : au bout de 4-5 tours l'URL
+     dépassait la limite de Vercel → HTTP 414 / « Réponse invalide », et le
+     serveur ne gardait de toute façon que 2 échanges tronqués (400/700),
+     donc la conversation semblait figée. Mercury/ZenMux, eux, recevaient
+     `reset=true` à CHAQUE appel : leur mémoire serveur était effacée en
+     permanence.
+     Désormais le site construit lui-même une fenêtre glissante bornée
+     (6 échanges max, ~3 000 caractères, priorité aux plus récents) et
+     demande à l'API historique de NE PAS rajouter son propre contexte :
+     `reset=1` + historique vide → ni double contexte, ni URL géante.
+     Un nouveau sujet / une nouvelle pièce jointe repart de zéro. */
   let contNote = null;
   let convCtx = null; // { history, reset } pour l'API chat-free-gpt
   if (imageMode === "chat") {
@@ -1837,22 +1953,12 @@ async function sendMessage(text, attachments) {
       !UAI_MODELS.has(effForApi) && !CHATI_MODELS.has(effForApi) &&
       !LUMO_MODELS.has(effForApi) && !MERCURY_MODELS.has(effForApi) &&
       !ZENMUX_MODELS.has(effForApi);
-    const firstMsg = !(conv.messages || []).some((m) => m.role === "assistant");
+    const noNewImages = !attachments || !attachments.length;
+    // Un PDF injecte déjà jusqu'à 3 200 caractères : ajouter le contexte
+    // ferait couper la fin du prompt par la limite 4 000 de callApi.
+    const noPdf = !(store.pdfs && store.pdfs.length);
 
-    if (chatFreeGptHandles) {
-      // Historique de CETTE conversation (les échanges y sont déjà en clair) ;
-      // reset=1 au premier message / quand on joint de nouvelles photos :
-      // la mémoire serveur d'un autre sujet ne doit pas polluer la demande.
-      const past = (!attachments || !attachments.length) ? lastUsableExchanges(conv) : [];
-      // AJOUT : joindre un PDF = nouveau sujet (comme de nouvelles photos).
-      convCtx = { history: past, reset: firstMsg || (attachments && attachments.length > 0) || (store.pdfs && store.pdfs.length > 0) };
-      if (!attachments || !attachments.length) {
-        const cont = buildContinuationPrompt(conv, sendText);
-        contNote = cont.kind === "follow" ? "🔁 suite de la conversation"
-          : cont.kind === "new" ? "💬 nouveau sujet" : null;
-      }
-      if (figNote) sendText += figNote;
-    } else if (!attachments || !attachments.length) {
+    if (noNewImages && noPdf) {
       const cont = buildContinuationPrompt(conv, sendText);
       if (cont.kind === "follow" && cont.prompt) {
         sendText = cont.prompt;
@@ -1860,8 +1966,13 @@ async function sendMessage(text, attachments) {
       } else if (cont.kind === "new") {
         contNote = "💬 nouveau sujet";
       }
-      if (figNote) sendText += figNote;
     }
+    if (chatFreeGptHandles) {
+      // reset=1 : l'API oublie sa mémoire interne (pas de double contexte).
+      // history vide : aucun JSON d'historique dans l'URL (anti-414).
+      convCtx = { history: [], reset: 1 };
+    }
+    if (figNote) sendText += figNote;
   } else if (figNote) {
     sendText += figNote;
   }
@@ -2219,16 +2330,20 @@ async function callApi(text, attachments, modelOverride, convCtx) {
       : (useLumo ? API_URL_LUMO : (useUAI ? API_URL_2 : (useChati ? API_URL_3 : API_URL))));
   const imgs = (attachments || []).slice(0, MAX_IMAGES_PER_REQUEST);
 
-  // AJOUT — conversation continue : l'API chat-free-gpt (premier backend)
-  // gère elle-même la continuité ; on lui transmet l'historique de cette
-  // conversation et, au besoin, le signal « reset » (nouvelle conversation
-  // ou nouvelles photos = nouveau sujet, on ne pollue pas la demande).
+  /* Conversation continue : le contexte est maintenant construit CÔTÉ SITE
+     (voir buildContinuationPrompt). On n'envoie plus l'historique complet
+     dans l'URL : si un appel fournit encore `convCtx.history`, il est borné
+     par boundedApiHistory (2 échanges, 400/700 caractères).
+     `reset=1` empêche l'API historique d'ajouter SON propre contexte par-dessus
+     le nôtre (double contexte) et évite qu'un retry réutilise une mémoire
+     périmée. */
   const viaChatFreeGpt = !useUAI && !useChati && !useLumo && !useMercury && !useZemux;
-  const historyJson =
+  const rawHistory =
     viaChatFreeGpt && convCtx && Array.isArray(convCtx.history) && convCtx.history.length
-      ? JSON.stringify(convCtx.history)
+      ? boundedApiHistory(convCtx.history)
       : null;
-  const resetFlag = viaChatFreeGpt && convCtx && convCtx.reset ? 1 : 0;
+  const historyJson = rawHistory && rawHistory.length ? JSON.stringify(rawHistory) : null;
+  const resetFlag = viaChatFreeGpt ? 1 : (convCtx && convCtx.reset ? 1 : 0);
 
   // Consigne LaTeX pour UnlimitedAI, ChatiPro, Mercury et ZenMux sur les
   // questions mathématiques (fraction horizontale, puissances et indices).
@@ -2252,6 +2367,16 @@ async function callApi(text, attachments, modelOverride, convCtx) {
   const handle = async (res) => {
     let data = null;
     try { data = await res.json(); } catch (e) { /* corps non JSON */ }
+    /* Vercel renvoie une page d'erreur HTML (donc non JSON) quand l'URL est
+       trop longue : on explique la cause au lieu d'afficher un obscur
+       « Réponse invalide ». */
+    if (res.status === 414 || res.status === 431) {
+      return {
+        success: false,
+        error: `Requête trop longue pour le service gratuit (HTTP ${res.status}). Raccourcissez votre message ou démarrez une nouvelle conversation.`,
+        model: data && data.model,
+      };
+    }
     if (!data || typeof data !== "object") {
       throw new Error(`Réponse invalide (HTTP ${res.status})`);
     }
@@ -2332,7 +2457,36 @@ async function callApi(text, attachments, modelOverride, convCtx) {
     params.set("lang", LANG);
     if (historyJson) params.set("history", historyJson);
     if (resetFlag) params.set("reset", "1");
-    return await handle(await fetch(`${ENDPOINT}?${params.toString()}`, fetchOpts));
+    const getUrl = `${ENDPOINT}?${params.toString()}`;
+
+    /* Filet anti-414 : une URL de plus de ~6 Ko (texte long + accents encodés)
+       est refusée par Vercel. L'API historique accepte aussi le POST JSON pour
+       le texte : on bascule automatiquement, avec repli GET si l'API déployée
+       est une ancienne version (404/405). */
+    if (viaChatFreeGpt && getUrl.length > 6000) {
+      try {
+        const res = await fetch(ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            prompt: promptText,
+            model,
+            uid: store.uid,
+            lang: LANG,
+            ...(historyJson ? { history: historyJson } : {}),
+            ...(resetFlag ? { reset: 1 } : {}),
+          }),
+          signal: controller.signal,
+        });
+        if (res.status !== 404 && res.status !== 405) return await handle(res);
+      } catch (err) {
+        if (err.name === "AbortError") {
+          throw new Error("Délai d'attente dépassé (90 s). L'API est peut-être surchargée.");
+        }
+        // panne réseau sur le POST : on tente quand même le GET
+      }
+    }
+    return await handle(await fetch(getUrl, fetchOpts));
   } catch (err) {
     if (err.name === "AbortError") {
       throw new Error("Délai d'attente dépassé (90 s). L'API est peut-être surchargée.");
@@ -2938,9 +3092,14 @@ function startParticles() {
 
 /* ---------- Init ---------- */
 function init() {
-  // uid persistant
-  store.uid = localStorage.getItem(LS_UID) || uid();
-  localStorage.setItem(LS_UID, store.uid);
+  // uid persistant — un quota plein ne doit PAS faire échouer toute l'init
+  // (avant, this.setItem levait une exception et l'application restait vide).
+  try {
+    store.uid = localStorage.getItem(LS_UID) || uid();
+    localStorage.setItem(LS_UID, store.uid);
+  } catch (e) {
+    store.uid = store.uid || uid();
+  }
 
   loadHistory();
   migrateRemovedMercurySelections();
@@ -3162,6 +3321,9 @@ window.Lumina = {
   resolveSendImages, rememberedImages, clearImageMemory, clearFigureMemory,
   renderImageMemoryPill, svgToPngDataUri, rememberFigure, detectFigureRemark,
   renderMarkdown, normalizeMercuryResult, normalizeZemuxResult,
+  // conversation continue / garde-fous de stockage (tests)
+  lastUsableExchanges, buildContinuationPrompt, boundedApiHistory,
+  pruneHeavyHistory, contextBudget: CONTEXT_BUDGET, contextTurns: CONTEXT_TURNS,
   mercuryModels: [...MERCURY_MODELS],
   zenmuxModels: [...ZENMUX_MODELS],
   visionModels: [...VISION_MODELS],

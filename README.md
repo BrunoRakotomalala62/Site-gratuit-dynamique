@@ -226,6 +226,63 @@ La logique existante (chat, vision, figures, maths, PRO) n'est pas modifiée.
   l'affiche ; une nouvelle photo la remplace, le bouton ✕ l'oublie.
 - 🌍 100 % côté client, zéro build, pas de clé API.
 
+## 🔁 Conversation continue : correctif du « crash après 4-5 échanges »
+
+Symptôme observé : la discussion semblait figée, puis une erreur apparaissait
+au bout de 4 ou 5 messages consécutifs. Quatre causes cumulées, toutes dans
+`app.js` :
+
+1. **Contexte trop court (2 échanges)** — `CONTEXT_TURNS = 2` côté site et
+   `MAX_EXCHANGES_PER_UID = 2` (400 / 700 caractères) côté `chat-free-gpt` :
+   dès le 3ᵉ échange, le début de la discussion était oublié. Mercury et
+   ZenMux recevaient `reset: true` à **chaque** appel, ce qui effaçait leur
+   mémoire serveur (pourtant prévue pour 24 messages).
+2. **Contexte coupé du mauvais côté** — `block.slice(0, hardCap)` coupait la
+   FIN d'un bloc classé ancien → récent : c'est l'échange le plus récent qui
+   disparaissait.
+3. **URL trop longue → HTTP 414** — le texte seul partait en **GET** avec
+   `history=JSON.stringify(...)` contenant les réponses **intégrales**, non
+   tronquées. Avec les accents encodés et les réponses rallongées par
+   `completeTruncatedReply` (jusqu'à 5 appels de plus par message), l'URL
+   atteignait plusieurs dizaines de Ko ; Vercel la refuse (414, page HTML →
+   « Réponse invalide »). Le tampon de 2 échanges se remplissait justement
+   vers le 4ᵉ / 5ᵉ tour, d'où la régularité du plantage.
+4. **Quotas gratuits + appels multipliés** — 10 msg/IP/jour (UnlimitedAI),
+   20 req/min (ZenMux), 2 messages/visiteur (aichatting). Chaque message
+   pouvait déclencher jusqu'à 5 appels de « suite » + 1 retry : le quota
+   tombait après 4-5 échanges → erreur 429. S'ajoutait le quota
+   `localStorage` (~5 Mo) saturé par les images en base64 : `saveHistory()`
+   l'ignorait silencieusement et l'historique entier cessait d'être sauvé.
+
+**Correctifs** :
+
+- Une **seule** fenêtre glissante côté site pour tous les backends :
+  `CONTEXT_TURNS = 6`, budget `CONTEXT_BUDGET = 3 000` caractères (sous la
+  limite 4 000 de `callApi`), priorité aux échanges **les plus récents**,
+  dernière demande jamais tronquée. Détection des renvois de type
+  « la question A) » / « le point 2) ».
+- L'API historique ne reçoit plus l'historique complet : `reset=1` et
+  `history` vide (elle ajoutait un second contexte). Si un appel fournit
+  encore un historique, `boundedApiHistory()` le borne à 2 échanges / 400 /
+  700 caractères. Au-delà de 6 Ko, le texte bascule automatiquement en
+  **POST JSON** (avec repli GET sur les anciennes versions de l'API), et les
+  HTTP 414/431 ont désormais un message clair.
+- `completeTruncatedReply()` : 2 suites maximum au lieu de 5 et plus de retry
+  inutile avec le même modèle — moins d'appels, donc moins de 429.
+- `saveHistory()` : en cas de `QuotaExceededError`, `pruneHeavyHistory()`
+  retire d'abord les données régénérables (PNG de figure, SVG, images des
+  messages anciens), puis les conversations les plus anciennes — **jamais**
+  la conversation active — et prévient l'utilisateur au lieu de perdre tout
+  l'historique. L'`uid` n'est plus écrit sans `try/catch` au démarrage.
+
+Vérification : `node test-figures.js` → **164 tests, 0 échec** (dont 17 nouveaux
+tests sur la fenêtre glissante, la taille de l'URL et le garde-fou de stockage).
+Test d'intégration (DOM simulé + `fetch` simulé) : **9 échanges consécutifs**,
+0 erreur JS, 0 bulle d'erreur, contexte présent à chaque suite, URL qui se
+stabilise à ~3,6 Ko au lieu de grossir indéfiniment. Une réponse HTTP 414
+forcée affiche désormais un message explicite au lieu de « Réponse invalide ».
+`index.html` passe en `app.js?v=55` pour invalider le cache des navigateurs.
+
 ## 🚀 Déploiement
 
 ```bash
@@ -265,6 +322,13 @@ Vercel de `mercyapi` et `zemuxapi`.
 | `image` / `images` | Image(s) (vision) — GET : `image=` répété ; POST : tableau `images`, max 4 |
 | `uid` | Identifiant client (renvoyé tel quel) |
 | `lang` | Langue du backend (défaut : `fr`) |
+| `reset` | `1` : l'API oublie sa mémoire interne (le site gère la continuité lui-même) |
+| `history` | Optionnel. Borné côté site à 2 échanges / 400 / 700 caractères |
+
+> La continuité de la conversation est construite **côté site** (fenêtre
+> glissante de 6 échanges) : le site envoie `reset=1` et aucun `history` brut,
+> pour éviter le double contexte et les URL trop longues. Les requêtes texte
+> dont l'URL dépasserait 6 Ko passent automatiquement en POST JSON.
 
 Réponse : `{ success, reply, model, uid, images?, conversationId, source }`.
 
@@ -281,7 +345,7 @@ Réponse : `{ success, reply, model, uid, images?, conversationId, source }`.
 index.html      → interface (hamburger, composer, lightbox…, chip « Trace une courbe »)
 styles.css      → thème premium (glassmorphism, animations, responsive, bloc figure)
 app.js          → logique (API, modèles, historique, pièces jointes, markdown, figures, mode vocal)
-test-figures.js → tests unitaires de la détection des figures (node test-figures.js)
+test-figures.js → tests unitaires (figures, LaTeX, conversation continue, stockage) — node test-figures.js
 vercel.json     → configuration Vercel (headers + cleanUrls)
 ```
 
@@ -296,7 +360,7 @@ vercel.json     → configuration Vercel (headers + cleanUrls)
   été retirés) ; PRO (`gpt-4o`, `gpt-5.6-terra` → 402)
 - ✅ Figures : `GET /api/plot?expression=x-2ln(x)` (courbe) et
   `GET /api/plot?subject=circuit+électrique…` (schéma IA) → `{ svg }`
-- ✅ Détection figures : `node test-figures.js` (31 tests)
+- ✅ `node test-figures.js` : **164 tests** (figures, LaTeX, conversation continue, garde-fou localStorage)
 - ✅ **Barre de saisie + menu ＋** (2026-09-28, Chrome headless) : le champ
   occupe **87 %** de la barre (702/806 px) et ne reste que **2 boutons** dans la
   barre (＋ et ➤) ; menu fermé au départ puis ouvert/positionné **au-dessus** ;
