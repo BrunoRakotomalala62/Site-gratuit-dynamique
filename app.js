@@ -41,8 +41,10 @@ const API_URL_ZEMUX = `${API_BASE_ZEMUX}/api`;
 /* AJOUT — InfinityRouter (illimité) : 3 routes texte/vision/auto-figure SVG.
    API wrapper déployée sur Vercel : infinity-router.vercel.app
    Source directe : https://infinityrouter.dev — clé stockée côté serveur. */
-const API_BASE_INFINITY = "https://infinity-router.vercel.app";
-const API_URL_INFINITY = `${API_BASE_INFINITY}/api/auto`;
+const API_BASE_INFINITY = "https://infinityrouter.dev/v1";
+const API_URL_INFINITY = `${API_BASE_INFINITY}/chat/completions`;
+// Clé InfinityRouter (wrapper Vercel la cache côté serveur, mais appel direct navigateur autorisé CORS)
+const INFINITY_KEY = "RP490qjF7PG6WQk117PpG0Hr6WfmeEUDhjcovxq1RW2FXY40";
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const LANG = "fr";
 const MAX_IMAGES = 4;
@@ -2125,43 +2127,60 @@ async function callInfinityApi(text, attachments, modelKey) {
   const realModel = INFINITY_MODEL_MAP[modelKey] || "deepseek-v4.1-flash-1017";
   const hasImages = !!(attachments && attachments.length);
   const img = hasImages ? attachments[0].value : null;
-  let promptForInfinity = String(text || "").slice(0, 4000);
+  // Prompt optimisé : plus court = réponse plus rapide (évite timeout 40s sur cercle)
+  let userPrompt = String(text || "").slice(0, 1200);
+  const needFigure = /figure|cercle|circle|triangle|schéma|dessine|tracer|construis/i.test(userPrompt);
+  let systemPrompt = "";
+  let promptForInfinity = userPrompt;
   if (looksMathy(promptForInfinity)) promptForInfinity += MATH_PROMPT_HINT;
-  const body = { message: promptForInfinity.slice(0, 8000), model: realModel };
-  if (img) body.image = img;
+  if (needFigure) {
+    systemPrompt = "Tu es un assistant géométrie. Génère une explication courte puis un SVG (viewBox 0 0 600 320, fond blanc) dans un bloc ```svg. Sois concis.";
+    // Limiter max_tokens pour accélérer
+  }
+  const messages = [];
+  if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
+  if (img) {
+    messages.push({ role: "user", content: [
+      { type: "text", text: promptForInfinity.slice(0, 2000) },
+      { type: "image_url", image_url: { url: img } }
+    ]});
+  } else {
+    messages.push({ role: "user", content: promptForInfinity.slice(0, 2000) });
+  }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 40000);
+  const timer = setTimeout(() => controller.abort(), 55000); // 55s pour cercle complexe
   try {
     const res = await fetch(API_URL_INFINITY, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(body),
+      headers: { "Authorization": `Bearer ${INFINITY_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ model: realModel, messages, max_tokens: needFigure ? 700 : 600 }),
       signal: controller.signal,
     });
     let data = null;
     try { data = await res.json(); } catch (e) { /* non JSON */ }
     if (!res.ok || !data) {
-      throw new Error((data && (data.error || data.details)) || `HTTP ${res.status}`);
+      const msg = data && (data.error && (data.error.message || data.error) || data.error) || `HTTP ${res.status}`;
+      throw new Error(msg);
     }
-    // Normaliser la réponse mathématique (conserver LaTeX des autres APIs)
-    let replyText = String(data.text || data.reply || "");
-    // Si la réponse contient une fraction brute sans LaTeX, on la laisse mais on s'assure que les puissances/indices sont bien rendus par KaTeX (déjà géré par renderMarkdown)
-    // Normaliser vers format commun {success, reply, model, tokens, svg, figureDetected}
+    let replyText = String(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || data.text || data.reply || "");
+    // Extraire SVG si présent dans la réponse
+    const svgMatch = replyText.match(/<svg[\s\S]*?<\/svg>/i);
+    const svg = svgMatch ? svgMatch[0] : (data.svg || null);
     return {
       success: true,
       reply: replyText,
       model: data.model || realModel,
       tokens: data.usage || data.tokens || null,
       usage: data.usage || null,
-      svg: data.svg || null,
-      hasSvg: !!data.svg,
-      figureDetected: !!data.figureDetected,
+      svg: svg,
+      hasSvg: !!svg,
+      figureDetected: !!svg || !!data.figureDetected,
       source: "infinity-router",
       raw: data,
     };
   } catch (err) {
-    if (err.name === "AbortError") return { success: false, error: "InfinityRouter a dépassé 40s (réessayez).", model: realModel };
-    return { success: false, error: err.message || "Erreur InfinityRouter", model: realModel };
+    if (err.name === "AbortError") return { success: false, error: "InfinityRouter met trop de temps (>55s) pour ce cercle. Réessayez avec une phrase plus courte comme : 'Cercle centre O rayon 3cm' ou changez de modèle (deepseek plus rapide).", model: realModel };
+    return { success: false, error: err.message.includes("access_denied") ? "Modèle non autorisé pour cette clé." : err.message || "Erreur InfinityRouter", model: realModel };
   } finally { clearTimeout(timer); }
 }
 
