@@ -2125,7 +2125,9 @@ async function callInfinityApi(text, attachments, modelKey) {
   const realModel = INFINITY_MODEL_MAP[modelKey] || "deepseek-v4.1-flash-1017";
   const hasImages = !!(attachments && attachments.length);
   const img = hasImages ? attachments[0].value : null;
-  const body = { message: String(text || "").slice(0, 8000), model: realModel };
+  let promptForInfinity = String(text || "").slice(0, 4000);
+  if (looksMathy(promptForInfinity)) promptForInfinity += MATH_PROMPT_HINT;
+  const body = { message: promptForInfinity.slice(0, 8000), model: realModel };
   if (img) body.image = img;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 40000);
@@ -2141,10 +2143,13 @@ async function callInfinityApi(text, attachments, modelKey) {
     if (!res.ok || !data) {
       throw new Error((data && (data.error || data.details)) || `HTTP ${res.status}`);
     }
+    // Normaliser la réponse mathématique (conserver LaTeX des autres APIs)
+    let replyText = String(data.text || data.reply || "");
+    // Si la réponse contient une fraction brute sans LaTeX, on la laisse mais on s'assure que les puissances/indices sont bien rendus par KaTeX (déjà géré par renderMarkdown)
     // Normaliser vers format commun {success, reply, model, tokens, svg, figureDetected}
     return {
       success: true,
-      reply: data.text || data.reply || "",
+      reply: replyText,
       model: data.model || realModel,
       tokens: data.usage || data.tokens || null,
       usage: data.usage || null,
@@ -2320,7 +2325,7 @@ async function callApi(text, attachments, modelOverride, convCtx) {
   // Consigne LaTeX pour UnlimitedAI, ChatiPro, Mercury et ZenMux sur les
   // questions mathématiques (fraction horizontale, puissances et indices).
   let promptText = text.trim().slice(0, 4000);
-  if ((useUAI || useChati || useMercury || useZemux) && looksMathy(promptText)) {
+  if ((useUAI || useChati || useMercury || useZemux || INFINITY_MODELS.has(model)) && looksMathy(promptText)) {
     promptText += MATH_PROMPT_HINT;
   }
 
