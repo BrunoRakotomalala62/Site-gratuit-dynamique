@@ -37,6 +37,12 @@ const API_URL_MERCURY = `${API_BASE_MERCURY}/api`;
    dans les variables Vercel de Zemux_api ; elle n'est jamais envoyée au navigateur. */
 const API_BASE_ZEMUX = "https://zemuxapi.vercel.app";
 const API_URL_ZEMUX = `${API_BASE_ZEMUX}/api`;
+
+/* AJOUT — InfinityRouter (illimité) : 3 routes texte/vision/auto-figure SVG.
+   API wrapper déployée sur Vercel : infinity-router.vercel.app
+   Source directe : https://infinityrouter.dev — clé stockée côté serveur. */
+const API_BASE_INFINITY = "https://infinity-router.vercel.app";
+const API_URL_INFINITY = `${API_BASE_INFINITY}/api/auto`;
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const LANG = "fr";
 const MAX_IMAGES = 4;
@@ -89,6 +95,11 @@ const MODELS = {
     ["lumo-max", "Lumo 2.0 Max"],
     ["lumo", "Lumo 2.0 (léger)"],
   ],
+  "InfinityRouter · Illimité ♾️": [
+    ["infinity-deepseek", "DeepSeek V4.1 Flash · illimité"],
+    ["infinity-minimax", "MiniMax M3.1 Flash · illimité"],
+    ["infinity-claude", "Claude Haiku 5.5 · illimité + Vision + SVG"],
+  ],
   "🖼️ Images": [
     ["__img_gen__", "🎨 générer une image"],
     ["__img_edit__", "🖌️ modifier une image jointe"],
@@ -116,11 +127,24 @@ const ZENMUX_MODELS = new Set([
   "dots-studio/dots3-note-prev",
 ]);
 
+/* InfinityRouter — modèles illimités via wrapper Vercel */
+const INFINITY_MODELS = new Set([
+  "infinity-deepseek",
+  "infinity-minimax",
+  "infinity-claude",
+]);
+const INFINITY_MODEL_MAP = {
+  "infinity-deepseek": "deepseek-v4.1-flash-1017",
+  "infinity-minimax": "minimax-m3.1-flash",
+  "infinity-claude": "claude-haiku-5-5",
+};
+
 /* Modèles compatibles IMAGE (vision) : gpt-5.6-luna (API historique),
    Mercury via mercury-decide, GLM 4.6V et Dots3-Note via ZenMux, les modèles
    vision UnlimitedAI (claude, chatgpt, gemini, grok, perplexity) et Lumo. */
 const VISION_MODELS = new Set([
   "gpt-5.6-luna", "mercury-3",
+  "infinity-deepseek", "infinity-minimax", "infinity-claude",
   "z-ai/glm-4.6v-flash-free", "dots-studio/dots3-note-prev",
   "claude", "chatgpt", "gemini", "grok", "perplexity",
   "lumo-max", "lumo",
@@ -1984,15 +2008,29 @@ async function sendMessage(text, attachments) {
           completed,
           tokens: finalData.tokens || undefined,
         };
+        // AJOUT InfinityRouter : si la réponse contient déjà un SVG (auto-figure), l'attacher directement
+        if (finalData.svg && finalData.hasSvg) {
+          reply.figure = { svg: finalData.svg, title: finalData.figureDetected ? "Figure InfinityRouter" : "Figure" };
+          // Mémoriser pour questions suivantes
+          try {
+            const desc = "Figure InfinityRouter : " + String(text || "").slice(0, 120);
+            await rememberFigure(conv, finalData.svg, reply.figure.title, desc);
+          } catch (e) { /* ignore */ }
+        }
         conv.messages.push(reply);
         const replyEl = renderMessage(reply);
         chatArea.appendChild(replyEl);
         // AJOUT — mode vocal : lire la réponse à voix haute si activé (🔊).
         maybeSpeakReply(reply);
-        // Figures : si la demande contient une consigne de dessin (courbe,
+        // Si figure Infinity déjà présente, ne pas relancer maybeBuildFigure (évite doublon)
+        if (reply.figure && reply.figure.svg) {
+          // figure déjà affichée via InfinityRouter
+        } else {
+          // Figures : si la demande contient une consigne de dessin (courbe,
         // schéma…) — y compris dans une photo d'exercice — on construit la
         // figure et on l'affiche à la fin de la réponse du bot.
         maybeBuildFigure(text, fullText || finalData.reply, conv, reply, replyEl, toSend.length > 0);
+        }
       }
     } else {
       const errMsg = {
@@ -2080,6 +2118,46 @@ function normalizeMercuryResult(data, status, fallbackModel) {
 function mercuryConversationUid() {
   const raw = `${store.uid || "web"}:${store.activeId || "default"}`;
   return raw.replace(/[^A-Za-z0-9._:@-]/g, "-").slice(0, 128);
+}
+
+/* ---------- InfinityRouter — wrapper 3 routes (text/vision/auto) ---------- */
+async function callInfinityApi(text, attachments, modelKey) {
+  const realModel = INFINITY_MODEL_MAP[modelKey] || "deepseek-v4.1-flash-1017";
+  const hasImages = !!(attachments && attachments.length);
+  const img = hasImages ? attachments[0].value : null;
+  const body = { message: String(text || "").slice(0, 8000), model: realModel };
+  if (img) body.image = img;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 40000);
+  try {
+    const res = await fetch(API_URL_INFINITY, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* non JSON */ }
+    if (!res.ok || !data) {
+      throw new Error((data && (data.error || data.details)) || `HTTP ${res.status}`);
+    }
+    // Normaliser vers format commun {success, reply, model, tokens, svg, figureDetected}
+    return {
+      success: true,
+      reply: data.text || data.reply || "",
+      model: data.model || realModel,
+      tokens: data.usage || data.tokens || null,
+      usage: data.usage || null,
+      svg: data.svg || null,
+      hasSvg: !!data.svg,
+      figureDetected: !!data.figureDetected,
+      source: "infinity-router",
+      raw: data,
+    };
+  } catch (err) {
+    if (err.name === "AbortError") return { success: false, error: "InfinityRouter a dépassé 40s (réessayez).", model: realModel };
+    return { success: false, error: err.message || "Erreur InfinityRouter", model: realModel };
+  } finally { clearTimeout(timer); }
 }
 
 async function callMercuryApi(text, attachments, model) {
@@ -2205,6 +2283,15 @@ async function callApi(text, attachments, modelOverride, convCtx) {
   // Vision (image jointe) : modèle compatible image si le modèle texte
   // choisi en fait partie ; sinon repli sur le sélecteur vision dédié.
   let model = modelOverride || currentModel();
+  // AJOUT InfinityRouter : si modèle Infinity → appel direct vers wrapper (gère texte+vision+figure auto)
+  if (INFINITY_MODELS.has(model)) {
+    const inf = await callInfinityApi(text, attachments, model);
+    // Adapter tokens pour l'affichage existant
+    if (inf.success && inf.tokens) {
+      // tokens déjà compatibles
+    }
+    return inf;
+  }
   // Vision : on respecte le modèle choisi par l'utilisateur s'il est
   // compatible image ; sinon repli sur le sélecteur vision dédié.
   if (hasImages && !VISION_MODELS.has(model)) model = visionModel();
