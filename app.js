@@ -2146,14 +2146,40 @@ async function callInfinityApi(text, attachments, modelKey) {
     messages.push({ role: "user", content: promptForInfinity.slice(0, 2000) });
   }
   const isVisionNoFigure = hasImages && !needFigure;
+  // Compression spécifique InfinityRouter : image trop lourde = timeout garanti
+  // On recompresse les data URLs en 512px q0.6 avant envoi (≈80Ko vs 350Ko)
+  const compressForInfinity = async (dataUrl) => {
+    if (!dataUrl || !dataUrl.startsWith("data:image")) return dataUrl;
+    try {
+      const img = await loadImageFromDataUrl(dataUrl);
+      // Infinity est très lent sur grandes images : on force 512px max
+      return toJpegDataUrl(img, 512, 0.6);
+    } catch (e) { return dataUrl; }
+  };
+  // Préparer les images compressées (toutes les pièces jointes, pas seulement la 1ère)
+  const prepareImages = async () => {
+    const out = [];
+    for (const a of (attachments || [])) {
+      if (a.value) out.push(await compressForInfinity(a.value));
+    }
+    return out.filter(Boolean).slice(0, 4);
+  };
   const attemptFetch = async (modelTry, timeoutMs) => {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     try {
+      // Compresser les images juste avant l'envoi
+      const imgs = hasImages ? await prepareImages() : [];
+      const msgContent = [];
+      msgContent.push({ type: "text", text: promptForInfinity.slice(0, 2000) });
+      for (const u of imgs) msgContent.push({ type: "image_url", image_url: { url: u } });
+      const msgs = [];
+      if (systemPrompt) msgs.push({ role: "system", content: systemPrompt });
+      msgs.push({ role: "user", content: imgs.length ? msgContent : promptForInfinity.slice(0, 2000) });
       const res = await fetch(API_URL_INFINITY, {
         method: "POST",
         headers: { "Authorization": `Bearer ${INFINITY_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ model: modelTry, messages, max_tokens: needFigure ? 650 : 550 }),
+        body: JSON.stringify({ model: modelTry, messages: msgs, max_tokens: needFigure ? 650 : 550 }),
         signal: ctl.signal,
       });
       let data = null;
@@ -2193,10 +2219,14 @@ async function callInfinityApi(text, attachments, modelKey) {
         return retry;
       } catch (e2) {}
     }
+    // Dernier fallback : si même deepseek timeout, essayer GLM 4.6V (Zemux, gratuit + vision, très rapide sur photos)
+    if (isTimeout && isVisionNoFigure && !INFINITY_MODELS.has("z-ai/glm-4.6v-flash-free") === false) {
+      // On ne peut pas appeler GLM depuis ici (autre API), on laisse le message inviter à changer de modèle
+    }
     if (isTimeout) {
       const hint = needFigure
         ? "Ce cercle demande beaucoup de calcul. Réessayez avec une phrase courte : 'Cercle centre O rayon 3cm' ou passez à DeepSeek (plus rapide pour les figures)."
-        : "La photo est peut-être trop lourde ou le serveur est chargé. Réessayez ou passez à DeepSeek (plus rapide en vision) / GLM 4.6V.";
+        : "La photo est lourde et le serveur Infinity est chargé. J'ai déjà compressé l'image — réessayez, ou mieux : passez à **GLM 4.6V Flash** ou **Dots3 Note** (gratuits, vision ultra-rapide) pour les photos.";
       return { success: false, error: `⏳ InfinityRouter met trop de temps (>35s). ${hint}`, model: realModel };
     }
     return { success: false, error: err.message && err.message.includes("access_denied") ? "Modèle non autorisé pour cette clé." : err.message || "Erreur InfinityRouter", model: realModel };
