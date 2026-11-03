@@ -2124,18 +2124,16 @@ function mercuryConversationUid() {
 
 /* ---------- InfinityRouter — wrapper 3 routes (text/vision/auto) ---------- */
 async function callInfinityApi(text, attachments, modelKey) {
-  const realModel = INFINITY_MODEL_MAP[modelKey] || "deepseek-v4.1-flash-1017";
+  let realModel = INFINITY_MODEL_MAP[modelKey] || "deepseek-v4.1-flash-1017";
   const hasImages = !!(attachments && attachments.length);
   const img = hasImages ? attachments[0].value : null;
-  // Prompt optimisé : plus court = réponse plus rapide (évite timeout 40s sur cercle)
   let userPrompt = String(text || "").slice(0, 1200);
-  const needFigure = /figure|cercle|circle|triangle|schéma|dessine|tracer|construis/i.test(userPrompt);
+  const needFigure = /figure|cercle|circle|triangle|schéma|dessine|tracer|construis|géométrie/i.test(userPrompt);
   let systemPrompt = "";
   let promptForInfinity = userPrompt;
   if (looksMathy(promptForInfinity)) promptForInfinity += MATH_PROMPT_HINT;
   if (needFigure) {
-    systemPrompt = "Tu es un assistant géométrie. Génère une explication courte puis un SVG (viewBox 0 0 600 320, fond blanc) dans un bloc ```svg. Sois concis.";
-    // Limiter max_tokens pour accélérer
+    systemPrompt = "Tu es un assistant géométrie. Réponds en 2 parties: 1) explication courte (2 phrases) 2) SVG dans ```svg (viewBox 0 0 600 320, fond blanc). Sois très concis.";
   }
   const messages = [];
   if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
@@ -2147,41 +2145,62 @@ async function callInfinityApi(text, attachments, modelKey) {
   } else {
     messages.push({ role: "user", content: promptForInfinity.slice(0, 2000) });
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 55000); // 55s pour cercle complexe
-  try {
-    const res = await fetch(API_URL_INFINITY, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${INFINITY_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ model: realModel, messages, max_tokens: needFigure ? 700 : 600 }),
-      signal: controller.signal,
-    });
-    let data = null;
-    try { data = await res.json(); } catch (e) { /* non JSON */ }
-    if (!res.ok || !data) {
-      const msg = data && (data.error && (data.error.message || data.error) || data.error) || `HTTP ${res.status}`;
-      throw new Error(msg);
+  const isVisionNoFigure = hasImages && !needFigure;
+  const attemptFetch = async (modelTry, timeoutMs) => {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const res = await fetch(API_URL_INFINITY, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${INFINITY_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ model: modelTry, messages, max_tokens: needFigure ? 650 : 550 }),
+        signal: ctl.signal,
+      });
+      let data = null;
+      try { data = await res.json(); } catch (e) {}
+      if (!res.ok || !data) {
+        const msg = data && (data.error && (data.error.message || data.error) || data.error) || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      let replyText = String(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || data.text || data.reply || "");
+      const svgMatch = replyText.match(/<svg[\s\S]*?<\/svg>/i);
+      const svg = svgMatch ? svgMatch[0] : (data.svg || null);
+      return {
+        success: true,
+        reply: replyText,
+        model: data.model || modelTry,
+        tokens: data.usage || data.tokens || null,
+        usage: data.usage || null,
+        svg: svg,
+        hasSvg: !!svg,
+        figureDetected: !!svg || !!data.figureDetected,
+        source: "infinity-router",
+        raw: data,
+      };
+    } finally {
+      clearTimeout(t);
     }
-    let replyText = String(data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || data.text || data.reply || "");
-    // Extraire SVG si présent dans la réponse
-    const svgMatch = replyText.match(/<svg[\s\S]*?<\/svg>/i);
-    const svg = svgMatch ? svgMatch[0] : (data.svg || null);
-    return {
-      success: true,
-      reply: replyText,
-      model: data.model || realModel,
-      tokens: data.usage || data.tokens || null,
-      usage: data.usage || null,
-      svg: svg,
-      hasSvg: !!svg,
-      figureDetected: !!svg || !!data.figureDetected,
-      source: "infinity-router",
-      raw: data,
-    };
+  };
+  try {
+    return await attemptFetch(realModel, 35000);
   } catch (err) {
-    if (err.name === "AbortError") return { success: false, error: "InfinityRouter met trop de temps (>55s) pour ce cercle. Réessayez avec une phrase plus courte comme : 'Cercle centre O rayon 3cm' ou changez de modèle (deepseek plus rapide).", model: realModel };
-    return { success: false, error: err.message.includes("access_denied") ? "Modèle non autorisé pour cette clé." : err.message || "Erreur InfinityRouter", model: realModel };
-  } finally { clearTimeout(timer); }
+    const isTimeout = err.name === "AbortError";
+    const isVisionTimeout = isTimeout && isVisionNoFigure;
+    if (isVisionTimeout && realModel !== "deepseek-v4.1-flash-1017") {
+      try {
+        const retry = await attemptFetch("deepseek-v4.1-flash-1017", 25000);
+        retry.model = retry.model + " (fallback deepseek rapide)";
+        return retry;
+      } catch (e2) {}
+    }
+    if (isTimeout) {
+      const hint = needFigure
+        ? "Ce cercle demande beaucoup de calcul. Réessayez avec une phrase courte : 'Cercle centre O rayon 3cm' ou passez à DeepSeek (plus rapide pour les figures)."
+        : "La photo est peut-être trop lourde ou le serveur est chargé. Réessayez ou passez à DeepSeek (plus rapide en vision) / GLM 4.6V.";
+      return { success: false, error: `⏳ InfinityRouter met trop de temps (>35s). ${hint}`, model: realModel };
+    }
+    return { success: false, error: err.message && err.message.includes("access_denied") ? "Modèle non autorisé pour cette clé." : err.message || "Erreur InfinityRouter", model: realModel };
+  }
 }
 
 async function callMercuryApi(text, attachments, model) {
